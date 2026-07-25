@@ -609,12 +609,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                                 onChange={e => handleActualSerialChange(activeSheetName, rIdx, e.target.value)}
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
-                                    const nextIdx = rIdx + 1;
-                                    const nextInput = document.getElementById(`actual-serial-input-${nextIdx}`);
-                                    if (nextInput) {
-                                      nextInput.focus();
-                                      nextInput.select();
-                                    }
+                                    e.target.blur();
                                   }
                                 }}
                                 style={{
