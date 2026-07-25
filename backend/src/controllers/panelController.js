@@ -939,7 +939,7 @@ export const uploadExcel = async (req, res) => {
       scriptPath = path.join(process.cwd(), 'backend', 'parse_excel.py');
     }
     
-    exec(`"${pyPath}" "${scriptPath}" "${tempFilePath}"`, async (err, stdout, stderr) => {
+    exec(`"${pyPath}" "${scriptPath}" "${tempFilePath}"`, { maxBuffer: 50 * 1024 * 1024 }, async (err, stdout, stderr) => {
       try { fs.unlinkSync(tempFilePath); } catch (e) {}
 
       if (err) {
@@ -948,7 +948,9 @@ export const uploadExcel = async (req, res) => {
       }
 
       try {
-        const parsed = JSON.parse(stdout);
+        const startIdx = stdout.indexOf('{');
+        const jsonStr = startIdx !== -1 ? stdout.substring(startIdx) : stdout;
+        const parsed = JSON.parse(jsonStr);
         if (!parsed.success) {
           return res.status(400).json({ error: parsed.error || "Failed parsing sheet." });
         }
