@@ -172,11 +172,20 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
   useEffect(() => {
     let scanBuffer = '';
     let lastKeyTime = Date.now();
+    let preScanValue = '';
+    let preScanInputId = null;
 
     const handleKeyDown = (e) => {
       const currentTime = Date.now();
       if (currentTime - lastKeyTime > 50) {
         scanBuffer = '';
+        if (document.activeElement && document.activeElement.tagName === 'INPUT') {
+          preScanValue = document.activeElement.value;
+          preScanInputId = document.activeElement.id;
+        } else {
+          preScanValue = '';
+          preScanInputId = null;
+        }
       }
       lastKeyTime = currentTime;
 
@@ -184,8 +193,30 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         if (scanBuffer.trim().length > 0) {
           const scannedVal = scanBuffer.trim();
           scanBuffer = '';
-          handleGlobalScan(scannedVal);
-          e.preventDefault();
+          
+          const isDummy = scannedVal.length === 8 || scannedVal.toLowerCase().startsWith('at');
+          if (isDummy) {
+            // Restore previous input value to unpollute it
+            if (preScanInputId) {
+              const inputEl = document.getElementById(preScanInputId);
+              if (inputEl) {
+                inputEl.value = preScanValue;
+                const event = new Event('input', { bubbles: true });
+                inputEl.dispatchEvent(event);
+              }
+            }
+            handleGlobalScan(scannedVal);
+            e.preventDefault();
+          } else {
+            // It's an actual serial barcode! Auto-fill if not focused on any input
+            if (!preScanInputId && activeRowIdx !== null) {
+              const inputEl = document.getElementById(`actual-serial-input-${activeRowIdx}`);
+              if (inputEl) {
+                inputEl.focus();
+                handleActualSerialChange(activeSheetName, activeRowIdx, scannedVal);
+              }
+            }
+          }
         }
       } else if (e.key.length === 1) {
         scanBuffer += e.key;
@@ -194,7 +225,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [excelSheets, activeSheetName, cellEdits]);
+  }, [excelSheets, activeSheetName, cellEdits, activeRowIdx]);
 
   // Locate, highlight and focus row matching scanned dummy barcode
   const handleGlobalScan = (scannedVal) => {
@@ -362,10 +393,9 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     }
 
     try {
-      // Validate barcode in database
-      const searchRes = await apiFetch(`/api/panels/search?barcode=${encodeURIComponent(cleanVal)}`);
-      if (!searchRes.ok) {
-        setRowErrors(prev => ({ ...prev, [rowIdx]: 'Barcode not found — rescan' }));
+      // Validate barcode length (at least 8 characters)
+      if (cleanVal.length < 8) {
+        setRowErrors(prev => ({ ...prev, [rowIdx]: 'Barcode must be at least 8 characters' }));
         return;
       }
 
@@ -577,6 +607,16 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                                 value={actualBarcode || ''}
                                 placeholder="Scan actual barcode"
                                 onChange={e => handleActualSerialChange(activeSheetName, rIdx, e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') {
+                                    const nextIdx = rIdx + 1;
+                                    const nextInput = document.getElementById(`actual-serial-input-${nextIdx}`);
+                                    if (nextInput) {
+                                      nextInput.focus();
+                                      nextInput.select();
+                                    }
+                                  }
+                                }}
                                 style={{
                                   padding: '4px 8px',
                                   background: 'var(--input-bg)',
