@@ -396,7 +396,6 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     try {
       // Validate barcode length (at least 12 characters)
       if (cleanVal.length < 12) {
-        setRowErrors(prev => ({ ...prev, [rowIdx]: 'Barcode must be at least 12 characters' }));
         return;
       }
 
@@ -616,11 +615,10 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                                 onBlur={(e) => {
                                   const val = e.target.value.trim();
                                   if (val.length > 0 && val.length < 12) {
-                                    // Discard invalid value
+                                    // Discard invalid value silently
                                     setCellEdits(prev => prev.filter(item => 
                                       !(item.sheet_name === activeSheetName && item.row_idx === rIdx && String(item.col_idx) === 'actual_serial_no')
                                     ));
-                                    setRowErrors(prev => ({ ...prev, [rIdx]: 'Barcode must be at least 12 characters' }));
                                   }
                                 }}
                                 style={{
