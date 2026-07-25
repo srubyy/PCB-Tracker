@@ -450,13 +450,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
   const handleExportSpreadsheet = async () => {
     setLoading(true);
     try {
-      const token = localStorage.getItem('accessToken');
-      const response = await fetch(`/api/lots/${lotId}/export-excel`, {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`
-        }
-      });
+      const response = await apiFetch(`/api/lots/${lotId}/export-excel`);
       
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
