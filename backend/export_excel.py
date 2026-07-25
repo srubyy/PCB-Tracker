@@ -179,14 +179,16 @@ def generate_excel(json_data):
             export_hist_cols = [
                 "Export Number", 
                 "Timestamp", 
-                "PCBs Scanned"
+                "PCBs Scanned",
+                "Who Exported"
             ]
             export_hist_rows = []
             for hist in export_history:
                 export_hist_rows.append([
                     hist.get('export_number', 1),
                     hist.get('timestamp', ''),
-                    hist.get('scanned_count', 0)
+                    hist.get('scanned_count', 0),
+                    hist.get('exported_by', 'Unknown')
                 ])
             df_hist = pd.DataFrame(export_hist_rows, columns=export_hist_cols)
             df_hist.to_excel(writer, sheet_name="Export History", index=False)
