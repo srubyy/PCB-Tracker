@@ -174,143 +174,19 @@ def generate_excel(json_data):
             df = pd.DataFrame(new_rows[1:], columns=new_rows[0])
             df.to_excel(writer, sheet_name=sheet_name, index=False)
             
-        # Rule 2: Append app-generated sheets after the original sheets
-        # 1. Scan Log
-        if scan_logs:
-            scan_log_cols = [
-                "Timestamp", 
-                "PCB Sr No", 
-                "Actual Serial No", 
-                "Mfg Year", 
-                "Scrap (Yes/No)", 
-                "Scanned By", 
-                "Session/Export Batch number"
-            ]
-            scan_log_rows = []
-            for log in scan_logs:
-                scan_log_rows.append([
-                    log.get('timestamp', ''),
-                    log.get('dummy_sr_no', ''),
-                    log.get('actual_serial_no', ''),
-                    log.get('mfg_year', '') or '',
-                    log.get('scrap', 'No'),
-                    log.get('scanned_by', 'Unknown'),
-                    log.get('session_export_batch', 1)
-                ])
-            df_scan = pd.DataFrame(scan_log_rows, columns=scan_log_cols)
-            df_scan.to_excel(writer, sheet_name="Scan Log", index=False)
-            
-        # 2. Discrepancy Report
-        has_discrepancies = False
-        table_a_rows = [] # Not yet scanned
-        table_b_rows = [] # Scanned and matched
-        table_c_rows = [] # Scrap list
-        
-        for sheet_name, rows in raw_sheets.items():
-            if not rows:
-                continue
-            dummy_col_idx, barcode_col_idx, _ = find_column_indices(rows)
-            sheet_edits = [e for e in cell_edits if e['sheet_name'] == sheet_name]
-            
-            for r_idx in range(1, len(rows)):
-                row = rows[r_idx]
-                
-                # Fetch actual serial barcode
-                actual_barcode = ''
-                for edit in sheet_edits:
-                    if int(edit['row_idx']) == r_idx and String_Match(edit['col_idx'], 'actual_serial_no'):
-                        actual_barcode = edit['value']
-                if not actual_barcode and barcode_col_idx != -1 and barcode_col_idx < len(row):
-                    actual_barcode = row[barcode_col_idx]
-                actual_barcode = str(actual_barcode).strip()
-                if actual_barcode == '-':
-                    actual_barcode = ''
-                    
-                dummy_sr_no = row[dummy_col_idx] if dummy_col_idx != -1 and dummy_col_idx < len(row) else ''
-                calculated_year = extract_mfg_year(actual_barcode)
-                scrap_status = 'Yes' if (calculated_year and calculated_year <= 2022) else 'No'
-                
-                repairable_val = 'No'
-                for edit in sheet_edits:
-                    if int(edit['row_idx']) == r_idx and String_Match(edit['col_idx'], 'repairable'):
-                        repairable_val = 'Yes' if edit['value'] == 'true' else 'No'
-                
-                if not actual_barcode:
-                    table_a_rows.append([sheet_name, r_idx + 1, dummy_sr_no])
-                else:
-                    table_b_rows.append([
-                        sheet_name, 
-                        r_idx + 1, 
-                        dummy_sr_no, 
-                        actual_barcode, 
-                        str(calculated_year) if calculated_year else '', 
-                        scrap_status, 
-                        repairable_val
-                    ])
-                    if scrap_status == 'Yes':
-                        table_c_rows.append([
-                            sheet_name, 
-                            r_idx + 1, 
-                            dummy_sr_no, 
-                            actual_barcode, 
-                            str(calculated_year) if calculated_year else '', 
-                            repairable_val
-                        ])
-                        
-        if table_a_rows or table_b_rows or table_c_rows:
-            has_discrepancies = True
-            
-        if has_discrepancies:
-            discrepancy_data = []
-            
-            # Table A: Not Yet Scanned
-            discrepancy_data.append(["Table A: Not Yet Scanned (Pending Inward)"])
-            discrepancy_data.append(["Sheet Name", "Row #", "PCB Sr No"])
-            for r in table_a_rows:
-                discrepancy_data.append(r)
-            discrepancy_data.append([]) # blank
-            discrepancy_data.append([]) # blank
-            
-            # Table B: Scanned and Matched
-            discrepancy_data.append(["Table B: Scanned and Matched (Inward Completed)"])
-            discrepancy_data.append(["Sheet Name", "Row #", "PCB Sr No", "Actual Serial No", "Mfg Year", "Scrap (Yes/No)", "Repairable (Yes/No)"])
-            for r in table_b_rows:
-                discrepancy_data.append(r)
-            discrepancy_data.append([]) # blank
-            discrepancy_data.append([]) # blank
-            
-            # Table C: Scrap List
-            discrepancy_data.append(["Table C: Scrap List (Mfg Year <= 2022)"])
-            discrepancy_data.append(["Sheet Name", "Row #", "PCB Sr No", "Actual Serial No", "Mfg Year", "Repairable (Yes/No)"])
-            for r in table_c_rows:
-                discrepancy_data.append(r)
-                
-            df_disc = pd.DataFrame(discrepancy_data)
-            df_disc.to_excel(writer, sheet_name="Discrepancy Report", header=False, index=False)
-            
-        # 3. Export History
+        # Rule 2: Append Export History after the original sheets
         if export_history:
             export_hist_cols = [
                 "Export Number", 
                 "Timestamp", 
-                "Who Exported", 
-                "Total Rows in Lot", 
-                "Scanned at that Moment", 
-                "Unscanned", 
-                "Scrapped", 
-                "File Name Generated"
+                "PCBs Scanned"
             ]
             export_hist_rows = []
             for hist in export_history:
                 export_hist_rows.append([
                     hist.get('export_number', 1),
                     hist.get('timestamp', ''),
-                    hist.get('exported_by', ''),
-                    hist.get('total_rows', 0),
-                    hist.get('scanned_count', 0),
-                    hist.get('unscanned_count', 0),
-                    hist.get('scrap_count', 0),
-                    hist.get('file_name', '')
+                    hist.get('scanned_count', 0)
                 ])
             df_hist = pd.DataFrame(export_hist_rows, columns=export_hist_cols)
             df_hist.to_excel(writer, sheet_name="Export History", index=False)
@@ -328,25 +204,9 @@ def generate_excel(json_data):
         
         # Enable grid lines explicitly
         ws.views.sheetView[0].showGridLines = True
-        
-        if sheet_name == "Discrepancy Report":
-            # Apply custom styles for discrepancy tables
-            for row in ws.iter_rows(values_only=False):
-                for cell in row:
-                    val = str(cell.value or '')
-                    if val.startswith("Table A:") or val.startswith("Table B:") or val.startswith("Table C:"):
-                        cell.font = Font(name="Arial", size=11, bold=True, color="1F4E78")
-                        cell.alignment = Alignment(horizontal="left", vertical="center")
-                    elif val in ["Sheet Name", "Row #", "PCB Sr No", "Actual Serial No", "Mfg Year", "Scrap (Yes/No)", "Repairable (Yes/No)"]:
-                        cell.fill = PatternFill(start_color="2F5597", end_color="2F5597", fill_type="solid")
-                        cell.font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
-                        cell.alignment = Alignment(horizontal="center", vertical="center")
-                    else:
-                        cell.font = normal_font
-            continue
             
         # Standard sheet headers formatting
-        is_orig_sheet = (sheet_name not in ["Scan Log", "Discrepancy Report", "Export History"])
+        is_orig_sheet = (sheet_name not in ["Export History"])
         
         # Format Headers
         for col_idx in range(1, ws.max_column + 1):
