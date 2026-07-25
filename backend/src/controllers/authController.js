@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
+import { OAuth2Client } from 'google-auth-library';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretactivationkey2026!';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'evenmoresecretrefreshkey2026!';
@@ -105,5 +106,72 @@ export const logout = async (req, res) => {
   } catch (err) {
     console.error('Logout error:', err);
     res.status(500).json({ error: "Server session termination error." });
+  }
+};
+
+const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '988396310523-21uvb3ke8jmtbk7o6alblq5ftd0mb91d.apps.googleusercontent.com';
+const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
+
+export const loginWithGoogle = async (req, res) => {
+  const { token } = req.body;
+  if (!token) {
+    return res.status(400).json({ error: "Google token is required." });
+  }
+
+  try {
+    const ticket = await googleClient.verifyIdToken({
+      idToken: token,
+      audience: GOOGLE_CLIENT_ID
+    });
+    const payload = ticket.getPayload();
+    const { email, name } = payload;
+
+    if (!email) {
+      return res.status(400).json({ error: "Invalid Google token payload." });
+    }
+
+    let user = await User.findByEmail(email);
+    if (!user) {
+      // Auto-create user with Employee role
+      user = await User.create({
+        name: name || email.split('@')[0],
+        email: email,
+        password_hash: '', // No local password
+        role: 'Employee',
+        attendance_rate: 100, // default
+        avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(name || email)}`
+      });
+    }
+
+    // Sign Access & Refresh tokens
+    const accessToken = jwt.sign(
+      { id: user.id, name: user.name, email: user.email, role: user.role },
+      JWT_SECRET,
+      { expiresIn: '15m' }
+    );
+
+    const refreshToken = jwt.sign(
+      { id: user.id },
+      JWT_REFRESH_SECRET,
+      { expiresIn: '7d' }
+    );
+
+    // Save refresh token in database
+    await User.updateRefreshToken(user.id, refreshToken);
+
+    res.json({
+      accessToken,
+      refreshToken,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        avatar: user.avatar
+      }
+    });
+  } catch (err) {
+    console.error('Google login error:', err);
+    res.status(401).json({ error: "Google authentication failed. Please try again." });
   }
 };

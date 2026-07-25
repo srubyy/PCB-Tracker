@@ -14,6 +14,7 @@
     "electrolyte-solutions": "file:..",
     "exceljs": "^4.4.0",
     "express": "^4.19.2",
+    "google-auth-library": "^10.9.1",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.11.5",
     "resend": "^6.12.4",

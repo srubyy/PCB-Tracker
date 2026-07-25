@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { Lock, AlertCircle, Eye, EyeOff } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { GoogleLogin } from '@react-oauth/google';
 
 const AuthPage = ({ showToast }) => {
-  const { login } = useAuth();
+  const { login, loginWithGoogle } = useAuth();
   
   const [loginEmail, setLoginEmail] = useState('');
   const [loginPassword, setLoginPassword] = useState('');
@@ -20,6 +21,19 @@ const AuthPage = ({ showToast }) => {
       showToast('Logged in successfully!');
     } catch (err) {
       setLoginError(err.message || 'Invalid credentials or connection failure.');
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  const handleGoogleSuccess = async (credentialResponse) => {
+    setLoginError('');
+    setLoginLoading(true);
+    try {
+      await loginWithGoogle(credentialResponse.credential);
+      showToast('Logged in successfully with Google!');
+    } catch (err) {
+      setLoginError(err.message || 'Google authentication failed.');
     } finally {
       setLoginLoading(false);
     }
@@ -97,6 +111,22 @@ const AuthPage = ({ showToast }) => {
             <button type="submit" className="btn" disabled={loginLoading}>
               {loginLoading ? 'Verifying Context...' : 'Authenticate'}
             </button>
+
+            <div style={{ display: 'flex', alignItems: 'center', margin: '20px 0', color: 'var(--text-muted)', fontSize: '0.75rem' }}>
+              <div style={{ flex: 1, height: '1px', background: 'var(--card-border)' }}></div>
+              <span style={{ padding: '0 10px', fontWeight: 600 }}>OR</span>
+              <div style={{ flex: 1, height: '1px', background: 'var(--card-border)' }}></div>
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'center' }}>
+              <GoogleLogin
+                onSuccess={handleGoogleSuccess}
+                onError={() => setLoginError('Google Login Failed. Please try again.')}
+                theme="filled_dark"
+                shape="rectangular"
+                width="360"
+              />
+            </div>
           </form>
         </div>
 

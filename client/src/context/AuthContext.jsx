@@ -60,6 +60,34 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  // Google Login handler
+  const loginWithGoogle = async (googleToken) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/api/auth/google-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: googleToken })
+      });
+      const data = await safeJson(res);
+      
+      if (!res.ok) {
+        throw new Error(data.error || 'Google login failed.');
+      }
+      
+      // Persist state in sessionStorage
+      sessionStorage.setItem('es_user', JSON.stringify(data.user));
+      sessionStorage.setItem('es_access_token', data.accessToken);
+      sessionStorage.setItem('es_refresh_token', data.refreshToken);
+      
+      setUser(data.user);
+      setAccessToken(data.accessToken);
+      return data.user;
+    } catch (err) {
+      console.error('Google login context error:', err);
+      throw err;
+    }
+  };
+
   // Logout handler
   const logout = async () => {
     try {
@@ -157,7 +185,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, accessToken, loading, login, logout, apiFetch }}>
+    <AuthContext.Provider value={{ user, accessToken, loading, login, loginWithGoogle, logout, apiFetch }}>
       {children}
     </AuthContext.Provider>
   );
