@@ -320,7 +320,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     try {
       const res = await apiFetch(`/api/lots/${lotId}/cell-edit`, {
         method: 'POST',
-        body: JSON.stringify({ sheet_name: sheetName, row_idx: rowIdx, col_idx, value })
+        body: JSON.stringify({ sheet_name: sheetName, row_idx: rowIdx, col_idx: colIdx, value })
       });
       if (!res.ok) {
         showToast('Failed to save cell edit.', 'danger');
