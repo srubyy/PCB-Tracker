@@ -23,7 +23,11 @@ const DEFAULT_12_STEPS = [
 const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
   const { user, apiFetch } = useAuth();
   
-  const [activeTab, setActiveTab] = useState('users');
+  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('es_settings_active_tab') || 'users');
+
+  useEffect(() => {
+    localStorage.setItem('es_settings_active_tab', activeTab);
+  }, [activeTab]);
   
   // Tab 1: System Users Directory
   const [adminUsers, setAdminUsers] = useState([]);
@@ -45,7 +49,7 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
 
   const fetchAdminUsers = async () => {
     try {
-      if (!user || user.role !== 'Superadmin') return;
+      if (!user || user.role === 'Employee') return;
       setAdminUsersLoading(true);
       const res = await apiFetch('/api/admin/users');
       if (res.ok) {
@@ -62,7 +66,7 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
 
   const fetchCompaniesList = async () => {
     try {
-      if (!user || user.role !== 'Superadmin') return;
+      if (!user || user.role === 'Employee') return;
       setCompaniesLoading(true);
       const res = await apiFetch('/api/stock/clients');
       if (res.ok) {
@@ -78,7 +82,7 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
   };
 
   useEffect(() => {
-    if (user && user.role === 'Superadmin') {
+    if (user && user.role !== 'Employee') {
       if (activeTab === 'users') {
         fetchAdminUsers();
       } else {
@@ -89,7 +93,7 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
 
   const handleCreateUser = async (e) => {
     e.preventDefault();
-    if (!user || user.role !== 'Superadmin') return;
+    if (!user || user.role === 'Employee') return;
     
     const firstName = newUserForm.firstName?.trim() || '';
     const lastName = newUserForm.lastName?.trim() || '';
@@ -139,7 +143,7 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
   };
 
   const handleToggleUserStatus = async (targetUserId) => {
-    if (!user || user.role !== 'Superadmin') return;
+    if (!user || user.role === 'Employee') return;
     try {
       const res = await apiFetch(`/api/admin/users/toggle/${targetUserId}`, {
         method: 'POST'
@@ -352,7 +356,7 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
     : '';
   const defaultPassword = 'Electrolyte2026!';
 
-  if (user?.role !== 'Superadmin') {
+  if (user?.role === 'Employee') {
     return (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '60vh', color: 'var(--text-muted)' }}>
         <div>You do not have administrative access privileges to configure system directories.</div>
@@ -479,9 +483,8 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
                   style={{ width: '100%', padding: '10px 12px', background: 'var(--input-bg)', color: 'var(--text-main)', borderRadius: 8, border: '1px solid var(--card-border)', cursor: 'pointer' }}
                 >
                   <option value="Employee">Employee (Operations Terminal Entry Only)</option>
-                  <option value="Team Lead">Team Lead (Operation Entry + Step clearance Level 1)</option>
+                  <option value="Team Lead">Team Lead (Operation Entry + Highest Configuration/Approval Authority)</option>
                   <option value="Manager">Manager (Operation Entry + final Step approvals)</option>
-                  <option value="Superadmin">Superadmin (All privileges + User Management)</option>
                 </select>
               </div>
 

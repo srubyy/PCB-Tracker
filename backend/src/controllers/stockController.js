@@ -9,8 +9,8 @@ import { RepairStep } from '../models/RepairStep.js';
 const checkCompleteLock = async (lotId, userRole, clientTransaction = null) => {
   const lot = await Lot.findById(lotId, clientTransaction);
   if (!lot) return false;
-  if (lot.status === 'Complete' && userRole !== 'Superadmin') {
-    return true; // Locked
+  if (lot.status === 'Complete' && userRole === 'Employee') {
+    return true; // Locked for Employees
   }
   return false;
 };
@@ -38,7 +38,10 @@ const checkAndAutoSetComplete = async (lotId, actorId, clientTransaction = null)
 
 export const getStock = async (req, res) => {
   try {
-    const lots = await Lot.getAll(req.query);
+    let lots = await Lot.getAll(req.query);
+    if (req.user && req.user.role === 'Employee') {
+      lots = lots.filter(l => l.status === 'Active');
+    }
     const result = [];
 
     for (const lot of lots) {
@@ -436,13 +439,13 @@ export const toggleComplete = async (req, res) => {
 
     const currentStatus = lot.status;
 
-    // Lock check: Only Superadmin can unlock a completed lot
-    if (currentStatus === 'Complete' && req.user.role !== 'Superadmin') {
+    // Lock check: Only Superadmin / Manager / Team Lead can unlock a completed lot
+    if (currentStatus === 'Complete' && req.user.role === 'Employee') {
       if (useTx) {
         await txClient.query('ROLLBACK');
         txClient.release();
       }
-      return res.status(403).json({ error: "Access denied. Lot is Complete and locked. Only a Superadmin can unlock it." });
+      return res.status(403).json({ error: "Access denied. Lot is Complete and locked. Employees cannot unlock it." });
     }
 
     const nextStatus = currentStatus === 'Complete' ? 'In Process' : 'Complete';

@@ -202,6 +202,15 @@ export function initializeMemoryDb() {
         }
       }
     }
+    // Map status values for pre-seeded lots to match rules:
+    tables.lots.forEach(lot => {
+      if (lot.status === 'In Process') {
+        lot.status = 'Active';
+      } else if (lot.status === 'Complete') {
+        lot.status = 'Closed';
+      }
+    });
+
     console.log(`✅ Loaded seed data successfully: parsed ${insertCount} INSERT statements.`);
     console.log(`📊 In-memory stats:`);
     console.log(`   - Clients: ${tables.clients.length}`);
@@ -360,11 +369,26 @@ export const createLot = (lot) => {
     return_qty: 0,
     redispatch_qty: 0,
     received_date: new Date().toISOString().split('T')[0],
-    status: 'In Process',
+    status: 'Draft',
+    scrap_year_threshold: null,
+    separate_year_threshold: null,
+    checkbox_year_threshold: null,
+    created_by: null,
     ...lot
   };
   tables.lots.push(newLot);
   return newLot;
+};
+
+export const updateLotRules = (id, rules) => {
+  const lot = tables.lots.find(r => r.id === id);
+  if (lot) {
+    lot.scrap_year_threshold = rules.scrap_year_threshold !== undefined ? rules.scrap_year_threshold : lot.scrap_year_threshold;
+    lot.separate_year_threshold = rules.separate_year_threshold !== undefined ? rules.separate_year_threshold : lot.separate_year_threshold;
+    lot.checkbox_year_threshold = rules.checkbox_year_threshold !== undefined ? rules.checkbox_year_threshold : lot.checkbox_year_threshold;
+    return lot;
+  }
+  return null;
 };
 
 export const updateLotStatus = (id, status) => {

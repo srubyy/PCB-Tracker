@@ -1,12 +1,21 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { FileSpreadsheet, Trash2, Plus, X, ArrowDown, Download } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) => {
+  const { user } = useAuth();
   // Spreadsheet States
   const [excelSheets, setExcelSheets] = useState({}); // { sheetName: [[cell, cell, ...], ...] }
   const [cellEdits, setCellEdits] = useState([]); // Array of edits: { sheet_name, row_idx, col_idx, value }
-  const [activeSheetName, setActiveSheetName] = useState('');
+  const [activeSheetName, setActiveSheetName] = useState(() => localStorage.getItem('es_inward_active_sheet') || '');
   const [visibleRowsCount, setVisibleRowsCount] = useState(500);
+
+  useEffect(() => {
+    if (activeSheetName) {
+      localStorage.setItem('es_inward_active_sheet', activeSheetName);
+    }
+  }, [activeSheetName]);
+  const [lotRules, setLotRules] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -105,13 +114,25 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         text: '✅ Valid'
       };
     }
-    if (year <= 2022) {
+    const scrapLimit = lotRules && lotRules.scrap_year_threshold !== null ? lotRules.scrap_year_threshold : 2021;
+    const sepLimit = lotRules && lotRules.separate_year_threshold !== null ? lotRules.separate_year_threshold : 2022;
+
+    if (year <= scrapLimit) {
       return {
         status: 'scrap',
         color: '#dc3545',
         bg: 'rgba(220, 53, 69, 0.1)',
         border: 'rgba(220, 53, 69, 0.3)',
         text: `🔴 SCRAP (Mfg ${year})`
+      };
+    }
+    if (lotRules && lotRules.separate_year_threshold !== null && year === sepLimit) {
+      return {
+        status: 'separate',
+        color: '#f59e0b',
+        bg: 'rgba(245, 158, 11, 0.1)',
+        border: 'rgba(245, 158, 11, 0.25)',
+        text: `🟡 SEPARATE (Mfg ${year})`
       };
     }
     return {
@@ -158,11 +179,17 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         const data = await res.json();
         setExcelSheets(data.sheets || {});
         setCellEdits(data.edits || []);
+        setLotRules(data.lot || null);
         
-        // Auto-select first sheet as active tab
+        // Auto-select first sheet as active tab or restore saved sheet
         const sheetNames = Object.keys(data.sheets || {});
-        if (sheetNames.length > 0 && !activeSheetName) {
-          setActiveSheetName(sheetNames[0]);
+        if (sheetNames.length > 0) {
+          const savedSheet = localStorage.getItem('es_inward_active_sheet');
+          if (savedSheet && sheetNames.includes(savedSheet)) {
+            setActiveSheetName(savedSheet);
+          } else {
+            setActiveSheetName(sheetNames[0]);
+          }
         }
       } else {
         showToast('Failed to load lot spreadsheet data.', 'danger');
@@ -369,6 +396,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         showToast('Failed to save cell edit.', 'danger');
         loadExcelData();
       } else {
+        loadExcelData();
         if (onSuccess) onSuccess();
       }
     } catch (err) {
@@ -397,6 +425,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
           method: 'POST',
           body: JSON.stringify({ sheet_name: sheetName, row_idx: rowIdx, col_idx: 'actual_serial_no', value: '' })
         });
+        loadExcelData();
         if (onSuccess) onSuccess();
       } catch (err) {
         console.error(err);
@@ -416,6 +445,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
       });
 
       if (res.ok) {
+        loadExcelData();
         if (onSuccess) onSuccess();
       } else {
         setRowErrors(prev => ({ ...prev, [rowIdx]: 'Error saving barcode' }));
@@ -567,14 +597,16 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
             >
               <Download size={14} /> Export Spreadsheet
             </button>
-            <button
-              type="button"
-              className="btn btn-secondary"
-              onClick={handleClearLot}
-              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: '0.72rem', background: '#dc3545', color: '#fff', border: 'none' }}
-            >
-              <X size={14} /> Clear Spreadsheet
-            </button>
+            {user?.role !== 'Employee' && (
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={handleClearLot}
+                style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: '0.72rem', background: '#dc3545', color: '#fff', border: 'none' }}
+              >
+                <X size={14} /> Clear Spreadsheet
+              </button>
+            )}
           </div>
         </div>
 
@@ -652,7 +684,9 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                       borderBottom: '1px solid rgba(255,255,255,0.02)',
                       background: isHighlighted 
                         ? 'rgba(var(--color-primary-rgb), 0.15)' 
-                        : (valInfo.status === 'scrap' ? 'rgba(220, 53, 69, 0.05)' : 'transparent'),
+                        : (valInfo.status === 'scrap' 
+                            ? 'rgba(220, 53, 69, 0.12)' 
+                            : (valInfo.status === 'separate' ? 'rgba(245, 158, 11, 0.12)' : 'transparent')),
                       transition: 'all 0.2s ease'
                     }}
                   >
@@ -724,45 +758,111 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                       }
 
                       if (col.type === 'action') {
-                        const isScrap = calculatedYear && calculatedYear <= 2022;
-                        if (isScrap) {
+                        if (!actualBarcode) {
                           return (
-                            <td
-                              key={cIdx}
-                              style={{
-                                padding: '6px 12px',
-                                fontWeight: 800,
-                                textAlign: 'center',
-                                minWidth: 120,
-                                color: '#dc3545'
-                              }}
-                            >
+                            <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 800, textAlign: 'center', minWidth: 120, color: '#94a3b8' }}>
+                              PENDING
+                            </td>
+                          );
+                        }
+
+                        const scrapLimit = lotRules && lotRules.scrap_year_threshold !== null ? lotRules.scrap_year_threshold : 2021;
+                        const sepLimit = lotRules && lotRules.separate_year_threshold !== null ? lotRules.separate_year_threshold : 2022;
+                        const chkLimit = lotRules && lotRules.checkbox_year_threshold !== null ? lotRules.checkbox_year_threshold : 2023;
+
+                        if (calculatedYear && calculatedYear <= scrapLimit) {
+                          return (
+                            <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 800, textAlign: 'center', minWidth: 120, color: '#dc3545' }}>
                               SCRAP
                             </td>
                           );
                         }
 
-                        const isRepairable = getCellValue(activeSheetName, rIdx, 'repairable', '') === 'true';
+                        if (calculatedYear && lotRules && lotRules.separate_year_threshold !== null && calculatedYear === sepLimit) {
+                          return (
+                            <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 800, textAlign: 'center', minWidth: 120, color: '#f59e0b' }}>
+                              SEPARATE
+                            </td>
+                          );
+                        }
+
+                        if (calculatedYear && calculatedYear >= chkLimit) {
+                          const repVal = getCellValue(activeSheetName, rIdx, 'repairable', '');
+                          const isRepairable = repVal === 'true';
+                          const isNonRepairable = repVal === 'false';
+                          
+                          return (
+                            <td key={cIdx} style={{ padding: '6px 12px', textAlign: 'center', minWidth: 160 }}>
+                              <div style={{ display: 'inline-flex', gap: 4, background: 'rgba(255,255,255,0.03)', padding: 2, borderRadius: 6, border: '1px solid var(--card-border)' }}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCellEdit(activeSheetName, rIdx, 'repairable', 'true')}
+                                  style={{
+                                    padding: '3px 8px',
+                                    fontSize: '0.62rem',
+                                    fontWeight: 700,
+                                    borderRadius: 4,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    background: isRepairable ? 'rgba(16, 185, 129, 0.2)' : 'transparent',
+                                    color: isRepairable ? '#10b981' : 'var(--text-muted)',
+                                    transition: 'all 0.2s'
+                                  }}
+                                >
+                                  Repairable
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleCellEdit(activeSheetName, rIdx, 'repairable', 'false')}
+                                  style={{
+                                    padding: '3px 8px',
+                                    fontSize: '0.62rem',
+                                    fontWeight: 700,
+                                    borderRadius: 4,
+                                    border: 'none',
+                                    cursor: 'pointer',
+                                    background: isNonRepairable ? 'rgba(239, 68, 68, 0.2)' : 'transparent',
+                                    color: isNonRepairable ? '#ef4444' : 'var(--text-muted)',
+                                    transition: 'all 0.2s'
+                                  }}
+                                >
+                                  Non-Rep
+                                </button>
+                              </div>
+                            </td>
+                          );
+                        }
+
                         return (
-                          <td key={cIdx} style={{ padding: '6px 12px', textAlign: 'center', minWidth: 120 }}>
-                            <input
-                              type="checkbox"
-                              checked={isRepairable}
-                              onChange={(e) => {
-                                handleCellEdit(activeSheetName, rIdx, 'repairable', e.target.checked ? 'true' : 'false');
-                              }}
-                              style={{
-                                cursor: 'pointer',
-                                transform: 'scale(1.25)',
-                                accentColor: 'var(--color-primary)'
-                              }}
-                            />
+                          <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 700, textAlign: 'center', minWidth: 120, color: 'var(--color-primary)' }}>
+                            VALID
                           </td>
                         );
                       }
 
                       // Normal Excel cell: Editable on click
                       const cellVal = getCellValue(activeSheetName, rIdx, col.index, row[col.index]);
+                      
+                      const headerVal = String((activeSheetRows[0] && activeSheetRows[0][col.index]) || '').trim().toLowerCase();
+                      const isReadOnlyCol = headerVal === 'date' || headerVal === 'time' || headerVal === 'month';
+
+                      if (isReadOnlyCol) {
+                        return (
+                          <td
+                            key={cIdx}
+                            style={{
+                              padding: '6px 12px',
+                              minWidth: 100,
+                              textAlign: 'center',
+                              color: 'var(--text-muted)',
+                              background: 'rgba(255, 255, 255, 0.02)'
+                            }}
+                          >
+                            {cellVal}
+                          </td>
+                        );
+                      }
+
                       const isEditing = editingCell && editingCell.rowIdx === rIdx && editingCell.colIdx === col.index;
 
                       return (
@@ -832,6 +932,14 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
             <ArrowDown size={14} /> Load More Rows ({activeSheetRows.length - visibleRowsCount} remaining)
           </button>
         )}
+      </div>
+    );
+  }
+
+  if (user?.role === 'Employee') {
+    return (
+      <div style={{ background: 'rgba(255,255,255,0.01)', padding: 32, borderRadius: 12, border: '1px solid var(--card-border)', textAlign: 'center', color: 'var(--text-muted)', marginTop: 12 }}>
+        <p style={{ margin: 0, fontSize: '0.8rem', fontWeight: 600 }}>No spreadsheet has been configured for this lot yet.</p>
       </div>
     );
   }

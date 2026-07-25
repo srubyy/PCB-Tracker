@@ -119,13 +119,13 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
     const qtyRecv = parseInt(newLot.qty_received);
     const hasDiscrepancy = qtySent !== qtyRecv;
 
-    if (hasDiscrepancy && !['Superadmin', 'Manager'].includes(user.role)) {
-      showToast('Manager or Superadmin privilege is required to sign off on discrepancies.', 'danger');
+    if (hasDiscrepancy && !['Superadmin', 'Manager', 'Team Lead'].includes(user.role)) {
+      showToast('Team Lead or Manager privilege is required to sign off on discrepancies.', 'danger');
       return;
     }
 
     if (hasDiscrepancy && !managerSignOff) {
-      showToast('You must confirm manager sign-off for this discrepancy.', 'warning');
+      showToast('You must confirm sign-off for this discrepancy.', 'warning');
       return;
     }
 
@@ -643,11 +643,11 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
                             background: 'none', 
                             border: 'none', 
                             color: isComplete ? 'var(--color-primary)' : '#475569', 
-                            cursor: (isComplete && user?.role !== 'Superadmin') ? 'not-allowed' : 'pointer',
+                            cursor: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 'not-allowed' : 'pointer',
                             padding: 4 
                           }}
-                          disabled={isComplete && user?.role !== 'Superadmin'}
-                          title={isComplete ? "Lock status (Only Superadmin can unlock)" : "Toggle Complete status"}
+                          disabled={isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)}
+                          title={isComplete ? "Lock status (Team Lead or Manager can unlock)" : "Toggle Complete status"}
                         >
                           {isComplete ? <ToggleRight size={20} /> : <ToggleLeft size={20} />}
                         </button>
@@ -692,7 +692,7 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
                   {/* Quick Action Transaction Toolbar */}
                   <div className="lot-action-btns" style={{ display: 'flex', gap: 6 }}>
                     <button 
-                      disabled={isComplete && user?.role !== 'Superadmin'}
+                      disabled={isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)}
                       onClick={() => {
                         setOutwardForm({ lot_id: lot.id, qty: '', remarks: '' });
                         setShowOutwardModal(true);
@@ -706,14 +706,14 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
                         background: 'rgba(16, 185, 129, 0.1)', 
                         border: '1px solid var(--card-border)', 
                         color: '#10b981',
-                        cursor: (isComplete && user?.role !== 'Superadmin') ? 'not-allowed' : 'pointer',
-                        opacity: (isComplete && user?.role !== 'Superadmin') ? 0.3 : 1
+                        cursor: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 'not-allowed' : 'pointer',
+                        opacity: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 0.3 : 1
                       }}
                     >
                       Dispatch Out
                     </button>
                     <button 
-                      disabled={isComplete && user?.role !== 'Superadmin'}
+                      disabled={isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)}
                       onClick={() => {
                         setReturnForm({ lot_id: lot.id, qty: '', reason: 'Solder Defect', remarks: '' });
                         setShowReturnModal(true);
@@ -727,14 +727,14 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
                         background: 'rgba(239, 68, 68, 0.1)', 
                         border: '1px solid var(--card-border)', 
                         color: '#ef4444',
-                        cursor: (isComplete && user?.role !== 'Superadmin') ? 'not-allowed' : 'pointer',
-                        opacity: (isComplete && user?.role !== 'Superadmin') ? 0.3 : 1
+                        cursor: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 'not-allowed' : 'pointer',
+                        opacity: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 0.3 : 1
                       }}
                     >
                       Log Return
                     </button>
                     <button 
-                      disabled={isComplete && user?.role !== 'Superadmin'}
+                      disabled={isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)}
                       onClick={() => {
                         setRedispatchForm({ lot_id: lot.id, qty: '', remarks: '' });
                         setShowRedispatchModal(true);
@@ -748,8 +748,8 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
                         background: 'rgba(59, 130, 246, 0.1)', 
                         border: '1px solid var(--card-border)', 
                         color: '#3b82f6',
-                        cursor: (isComplete && user?.role !== 'Superadmin') ? 'not-allowed' : 'pointer',
-                        opacity: (isComplete && user?.role !== 'Superadmin') ? 0.3 : 1
+                        cursor: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 'not-allowed' : 'pointer',
+                        opacity: (isComplete && !['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)) ? 0.3 : 1
                       }}
                     >
                       Redispatch

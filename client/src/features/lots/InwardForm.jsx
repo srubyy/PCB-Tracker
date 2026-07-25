@@ -6,7 +6,7 @@ const InwardForm = ({ onSubmit, onCancel, newLot, setNewLot, managerSignOff, set
   const diffQty = isDiscrepancy ? Math.abs(parseInt(newLot.qty_sent) - parseInt(newLot.qty_received)) : 0;
   const isShortage = isDiscrepancy && parseInt(newLot.qty_received) < parseInt(newLot.qty_sent);
 
-  const canSave = !isDiscrepancy || (['Superadmin', 'Manager'].includes(userRole) && managerSignOff);
+  const canSave = !isDiscrepancy || (['Superadmin', 'Manager', 'Team Lead'].includes(userRole) && managerSignOff);
 
   return (
     <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 16 }}>
@@ -84,9 +84,9 @@ const InwardForm = ({ onSubmit, onCancel, newLot, setNewLot, managerSignOff, set
             <p style={{ fontSize: '0.7rem', color: 'var(--text-muted)', lineHeight: 1.4, marginBottom: 8 }}>
               The actual received quantity ({newLot.qty_received}) differs from Challan Quantity ({newLot.qty_sent}) by {diffQty} units.
             </p>
-            {!['Superadmin', 'Manager'].includes(userRole) ? (
+            {!['Superadmin', 'Manager', 'Team Lead'].includes(userRole) ? (
               <div style={{ color: '#f87171', fontSize: '0.7rem', fontWeight: 700 }}>
-                🚫 BLOCKER: You have Team Lead privileges. Discrepancy requires a Manager or Superadmin to inward.
+                🚫 BLOCKER: You have Operator/Employee privileges. Discrepancy requires a Team Lead, Manager, or Superadmin to inward.
               </div>
             ) : (
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text-main)', fontWeight: 600 }}>
@@ -96,7 +96,7 @@ const InwardForm = ({ onSubmit, onCancel, newLot, setNewLot, managerSignOff, set
                   onChange={e => setManagerSignOff(e.target.checked)} 
                   style={{ width: 'auto' }}
                 />
-                I confirm Manager sign-off for this discrepancy.
+                I confirm Team Lead / Manager sign-off for this discrepancy.
               </label>
             )}
           </div>

@@ -13,17 +13,30 @@ import LotsPage from './pages/Lots/LotsPage';
 import WorkflowsPage from './pages/Workflows/WorkflowsPage';
 import EngineersPage from './pages/Engineers/EngineersPage';
 import SettingsPage from './pages/Settings/SettingsPage';
+import LotSetupWizard from './pages/LotSetup/LotSetupWizard';
 
 function App() {
   const { user, loading, apiFetch } = useAuth();
-  const [view, setView] = useState('dashboard');
+  const [view, setView] = useState(() => localStorage.getItem('es_app_view') || 'dashboard');
   const [searchLotNo, setSearchLotNo] = useState('');
   const [searchSrNo, setSearchSrNo] = useState('');
   const [lots, setLots] = useState([]);
-  const [globalLotNo, setGlobalLotNo] = useState('');
-  const [selectedCompany, setSelectedCompany] = useState('');
+  const [globalLotNo, setGlobalLotNo] = useState(() => localStorage.getItem('es_app_global_lot_no') || '');
+  const [selectedCompany, setSelectedCompany] = useState(() => localStorage.getItem('es_app_selected_company') || '');
   const [notification, setNotification] = useState(null);
   const [companies, setCompanies] = useState([]);
+
+  useEffect(() => {
+    localStorage.setItem('es_app_view', view);
+  }, [view]);
+
+  useEffect(() => {
+    localStorage.setItem('es_app_global_lot_no', globalLotNo);
+  }, [globalLotNo]);
+
+  useEffect(() => {
+    localStorage.setItem('es_app_selected_company', selectedCompany);
+  }, [selectedCompany]);
 
   const fetchLotsList = async () => {
     try {
@@ -196,7 +209,13 @@ function App() {
                 >
                   <option value="">All Lots (Global View)</option>
                   {Array.isArray(lots) && lots
-                    .filter(l => selectedCompany ? l.client_name && l.client_name.toLowerCase().includes(selectedCompany.toLowerCase()) : false)
+                    .filter(l => {
+                      const matchesCompany = selectedCompany ? l.client_name && l.client_name.toLowerCase().includes(selectedCompany.toLowerCase()) : false;
+                      if (user && user.role === 'Employee') {
+                        return matchesCompany && l.status === 'Active';
+                      }
+                      return matchesCompany;
+                    })
                     .map(l => (
                       <option key={l.id} value={l.lot_no}>Lot {l.lot_no}</option>
                     ))
@@ -233,11 +252,18 @@ function App() {
             showToast={showToast} 
           />
         )}
+        {view === 'setup' && (
+          <LotSetupWizard 
+            showToast={showToast} 
+            apiFetch={apiFetch}
+            onRefreshLots={fetchLotsList}
+          />
+        )}
 
         {view === 'leaderboard' && (
           <EngineersPage showToast={showToast} />
         )}
-        {view === 'users' && user.role === 'Superadmin' && (
+        {view === 'users' && ['Superadmin', 'Manager', 'Team Lead'].includes(user.role) && (
           <SettingsPage 
             showToast={showToast} 
             onRefreshCompanies={fetchClientsList}

@@ -13,8 +13,11 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   const [stockData, setStockData] = useState([]);
 
   // Terminal selection states
-  const [selectedProductionStep, setSelectedProductionStep] = useState(1);
-  const [productionLotId, setProductionLotId] = useState('');
+  const [selectedProductionStep, setSelectedProductionStep] = useState(() => {
+    const saved = localStorage.getItem('es_workflow_step');
+    return saved ? parseInt(saved, 10) : 1;
+  });
+  const [productionLotId, setProductionLotId] = useState(() => localStorage.getItem('es_workflow_lot_id') || '');
   const [productionPcbType, setProductionPcbType] = useState('GV3 Digital PCB');
   const [stepInputs, setStepInputs] = useState({});
   const [pendingProductionLogs, setPendingProductionLogs] = useState([]);
@@ -22,7 +25,19 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   const [lotProductionStats, setLotProductionStats] = useState(null);
   const [rejectionLogInputId, setRejectionLogInputId] = useState(null);
   const [rejectionLogText, setRejectionLogText] = useState('');
-  const [inwardTab, setInwardTab] = useState('summary');
+  const [inwardTab, setInwardTab] = useState(() => localStorage.getItem('es_workflow_inward_tab') || 'summary');
+
+  useEffect(() => {
+    localStorage.setItem('es_workflow_step', selectedProductionStep);
+  }, [selectedProductionStep]);
+
+  useEffect(() => {
+    localStorage.setItem('es_workflow_lot_id', productionLotId);
+  }, [productionLotId]);
+
+  useEffect(() => {
+    localStorage.setItem('es_workflow_inward_tab', inwardTab);
+  }, [inwardTab]);
 
 
   const [steps, setSteps] = useState([

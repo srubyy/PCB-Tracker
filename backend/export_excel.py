@@ -80,6 +80,10 @@ def generate_excel(json_data):
     scan_logs = json_data.get('scan_logs', [])
     export_history = json_data.get('export_history', [])
     
+    scrap_year_threshold = json_data.get('scrap_year_threshold')
+    separate_year_threshold = json_data.get('separate_year_threshold')
+    checkbox_year_threshold = json_data.get('checkbox_year_threshold')
+    
     # Initialize ExcelWriter
     with pd.ExcelWriter(dest_path, engine='openpyxl') as writer:
         # Rule 1: Preserve all original sheets exactly, with edits overlaid
@@ -149,11 +153,18 @@ def generate_excel(json_data):
                     if int(edit['row_idx']) == r_idx and String_Match(edit['col_idx'], 'repairable'):
                         repairable_val = 'Yes' if edit['value'] == 'true' else 'No'
                 
-                action_val = '-'
-                if calculated_year and calculated_year <= 2022:
-                    action_val = 'Scrap'
-                elif repairable_val == 'Yes':
-                    action_val = 'Repairable'
+                action_val = 'Pending' if not actual_barcode else '-'
+                if calculated_year:
+                    scrap_limit = scrap_year_threshold if scrap_year_threshold is not None else 2021
+                    sep_limit = separate_year_threshold if separate_year_threshold is not None else 2022
+                    chk_limit = checkbox_year_threshold if checkbox_year_threshold is not None else 2023
+                    
+                    if calculated_year <= scrap_limit:
+                        action_val = 'Scrap'
+                    elif separate_year_threshold is not None and calculated_year == sep_limit:
+                        action_val = 'Separate'
+                    elif calculated_year >= chk_limit:
+                        action_val = 'Repairable' if repairable_val == 'Yes' else 'Non-Repairable'
                 
                 # Format calculated year
                 year_display = str(calculated_year) if calculated_year else ''

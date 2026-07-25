@@ -25,7 +25,7 @@ const ReturnModal = ({ isOpen, onClose, onSubmit, stockData, user, form, setForm
               onChange={e => setForm({...form, lot_id: e.target.value})}
             >
               <option value="">-- Choose Lot --</option>
-              {stockData.filter(l => l.status !== 'Complete' || user?.role === 'Superadmin').map(l => (
+              {stockData.filter(l => l.status !== 'Complete' || ['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)).map(l => (
                 <option key={l.id} value={l.id}>Lot {l.lot_no}</option>
               ))}
             </select>

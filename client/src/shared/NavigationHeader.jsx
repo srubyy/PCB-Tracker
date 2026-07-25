@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, Wrench, ShieldCheck, Trophy, Users, LogOut, User } from 'lucide-react';
+import { LayoutDashboard, Package, Wrench, ShieldCheck, Trophy, Users, LogOut, User, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const NavigationHeader = ({ view, setView, showToast }) => {
@@ -31,6 +31,14 @@ const NavigationHeader = ({ view, setView, showToast }) => {
             <Package size={18} /> Stock Summary
           </button>
         )}
+        {user.role !== 'Employee' && (
+          <button 
+            onClick={() => setView('setup')} 
+            className={`app-nav-tab ${view === 'setup' ? 'active' : ''}`}
+          >
+            <FileSpreadsheet size={18} /> Lot Setup
+          </button>
+        )}
         <button 
           onClick={() => setView('repair')} 
           className={`app-nav-tab ${view === 'repair' ? 'active' : ''}`}
@@ -44,7 +52,7 @@ const NavigationHeader = ({ view, setView, showToast }) => {
         >
           <Trophy size={18} /> Leaderboard
         </button>
-        {user.role === 'Superadmin' && (
+        {['Superadmin', 'Manager', 'Team Lead'].includes(user.role) && (
           <button 
             onClick={() => setView('users')} 
             className={`app-nav-tab ${view === 'users' ? 'active' : ''}`}

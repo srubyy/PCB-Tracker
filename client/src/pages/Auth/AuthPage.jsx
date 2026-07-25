@@ -104,7 +104,6 @@ const AuthPage = ({ showToast }) => {
         <div style={{ marginTop: 24, padding: 12, background: 'var(--card-bg)', borderRadius: 12, fontSize: '0.7rem', color: 'var(--text-muted)' }}>
           <div style={{ fontWeight: 800, color: 'var(--color-primary)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}><Lock size={10} /> Operator Cheat Sheet:</div>
           - Team Lead Account: <span style={{ color: 'var(--text-main)' }}>rahul.gupta@electrolytesoln.com</span> / <span style={{ color: 'var(--text-main)' }}>Electrolyte2026!</span><br/>
-          - Super Admin Account: <span style={{ color: 'var(--text-main)' }}>superadmin@electrolytesoln.com</span> / <span style={{ color: 'var(--text-main)' }}>Electrolyte2026!</span><br/>
           - Engineer Account 1: <span style={{ color: 'var(--text-main)' }}>mayuri.s@electrolytesoln.com</span> / <span style={{ color: 'var(--text-main)' }}>Electrolyte2026!</span><br/>
           - Engineer Account 2: <span style={{ color: 'var(--text-main)' }}>akash.p@electrolytesoln.com</span> / <span style={{ color: 'var(--text-main)' }}>Electrolyte2026!</span><br/>
           - Engineer Account 3: <span style={{ color: 'var(--text-main)' }}>nilam.dhanavde@electrolytesoln.com</span> / <span style={{ color: 'var(--text-main)' }}>Electrolyte2026!</span><br/>

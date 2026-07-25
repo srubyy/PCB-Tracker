@@ -997,6 +997,92 @@ export const getExcelData = async (req, res) => {
     return res.status(400).json({ error: "Invalid lot ID." });
   }
 
+  const formatLocalTime = (dateInput) => {
+    if (!dateInput) return '';
+    const dObj = new Date(dateInput);
+    if (isNaN(dObj.getTime())) return String(dateInput);
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())} ${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
+  };
+
+  const processSheets = (sheetsObj, logsList) => {
+    if (!sheetsObj) return {};
+    const processed = {};
+    Object.keys(sheetsObj).forEach(sheetName => {
+      const rows = sheetsObj[sheetName] || [];
+      if (rows.length === 0) {
+        processed[sheetName] = rows;
+        return;
+      }
+
+      const header = rows[0] || [];
+      let dateColIdx = -1;
+      let monthColIdx = -1;
+      for (let c = 0; c < header.length; c++) {
+        const val = String(header[c] || '').trim().toLowerCase();
+        if (val === 'date') dateColIdx = c;
+        if (val === 'month') monthColIdx = c;
+      }
+
+      const appendTime = (monthColIdx === -1);
+      const appendDate = (dateColIdx === -1);
+
+      const newRows = [];
+      for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+        const row = [...rows[rIdx]];
+        if (rIdx === 0) {
+          if (monthColIdx !== -1) {
+            row[monthColIdx] = 'Time';
+          } else {
+            row.push('Time');
+          }
+          if (dateColIdx !== -1) {
+            row[dateColIdx] = 'Date';
+          } else {
+            row.push('Date');
+          }
+        } else {
+          const log = logsList.find(l => l.sheet_name === sheetName && Number(l.row_idx) === rIdx);
+          let scanDateStr = '';
+          let scanTimeStr = '';
+          if (log && log.timestamp) {
+            const parts = String(log.timestamp).split(' ');
+            if (parts.length === 2) {
+              scanDateStr = parts[0];
+              scanTimeStr = parts[1];
+            } else {
+              const dObj = new Date(log.timestamp);
+              if (!isNaN(dObj.getTime())) {
+                const pad = (num) => String(num).padStart(2, '0');
+                scanDateStr = `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())}`;
+                scanTimeStr = `${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
+              }
+            }
+          }
+
+          if (monthColIdx !== -1) {
+            row[monthColIdx] = scanTimeStr || '-';
+          }
+          if (dateColIdx !== -1) {
+            if (scanDateStr) {
+              row[dateColIdx] = scanDateStr;
+            }
+          }
+
+          if (appendTime) {
+            row.push(scanTimeStr || '-');
+          }
+          if (appendDate) {
+            row.push(scanDateStr || '');
+          }
+        }
+        newRows.push(row);
+      }
+      processed[sheetName] = newRows;
+    });
+    return processed;
+  };
+
   const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
   let sheets = {};
   if (fs.existsSync(finalJsonPath)) {
@@ -1019,7 +1105,38 @@ export const getExcelData = async (req, res) => {
     console.error(err);
   }
 
-  res.json({ sheets, edits });
+  let scanLogs = [];
+  try {
+    if (isFallback()) {
+      scanLogs = memoryDb.tables.scan_logs
+        .filter(e => e.lot_id === lotId)
+        .map(e => ({
+          ...e,
+          timestamp: formatLocalTime(e.timestamp)
+        }));
+    } else {
+      const scansRes = await pool.query(
+        "SELECT timestamp, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, sheet_name, row_idx FROM scan_logs WHERE lot_id = $1 ORDER BY timestamp ASC",
+        [lotId]
+      );
+      scanLogs = scansRes.rows.map(s => ({
+        ...s,
+        timestamp: formatLocalTime(s.timestamp)
+      }));
+    }
+  } catch (err) {
+    console.error(err);
+  }
+
+  let lot = null;
+  try {
+    lot = await Lot.findById(lotId);
+  } catch (err) {
+    console.error(err);
+  }
+
+  const processedSheets = processSheets(sheets, scanLogs);
+  res.json({ sheets: processedSheets, edits, lot });
 };
 
 export const saveCellEdit = async (req, res) => {
@@ -1103,55 +1220,111 @@ export const saveCellEdit = async (req, res) => {
           }
         }
 
-        // Cumulative scan log tracking (Rule 4)
-        if (updateField === 'real_sr_no' && updateValue && updateValue.trim().length >= 12) {
-          let nextBatchNum = 1;
-          if (isFallback()) {
-            const lotExports = memoryDb.tables.export_history.filter(e => e.lot_id === lotId);
-            if (lotExports.length > 0) {
-              nextBatchNum = Math.max(...lotExports.map(e => e.export_number)) + 1;
-            }
-          } else {
-            const maxExportRes = await pool.query(
-              'SELECT COALESCE(MAX(export_number), 0) as max_val FROM export_history WHERE lot_id = $1',
-              [lotId]
-            );
-            nextBatchNum = parseInt(maxExportRes.rows[0].max_val, 10) + 1;
-          }
+      }
 
-          const dummySrNo = rows[row_idx] && dummyColIdx !== -1 ? rows[row_idx][dummyColIdx] : '';
-          const mfgYear = extractMfgYear(updateValue);
-          const scrapVal = mfgYear && mfgYear <= 2022 ? 'Yes' : 'No';
+      // Update or Insert scan log timestamp when ANY cell in the row is edited
+      const dummySrNo = rows[row_idx] && dummyColIdx !== -1 ? rows[row_idx][dummyColIdx] : '';
 
-          if (isFallback()) {
-            memoryDb.tables.scan_logs.push({
-              lot_id: lotId,
-              sheet_name,
-              row_idx: parseInt(row_idx, 10),
-              dummy_sr_no: dummySrNo,
-              actual_serial_no: updateValue,
-              mfg_year: mfgYear,
-              scrap: scrapVal,
-              scanned_by: (req.user && req.user.name) || 'Unknown',
-              session_export_batch: nextBatchNum,
-              timestamp: new Date()
-            });
-          } else {
-            await pool.query(`
-              INSERT INTO scan_logs (lot_id, sheet_name, row_idx, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, timestamp)
-              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
-            `, [
-              lotId,
-              sheet_name,
-              parseInt(row_idx, 10),
-              dummySrNo,
-              updateValue,
-              mfgYear,
-              scrapVal,
-              (req.user && req.user.name) || 'Unknown',
-              nextBatchNum
-            ]);
-          }
+      // Resolve actual serial value for this row
+      let actualSerialVal = '';
+      if (isFallback()) {
+        const editsList = memoryDb.tables.cell_edits || [];
+        const barcodeEdit = editsList.find(e => 
+          e.lot_id === lotId && e.sheet_name === sheet_name && Number(e.row_idx) === Number(row_idx) && String(e.col_idx) === 'actual_serial_no'
+        );
+        if (barcodeEdit) {
+          actualSerialVal = barcodeEdit.value;
+        } else if (barcodeColIdx !== -1 && rows[row_idx]) {
+          actualSerialVal = rows[row_idx][barcodeColIdx] || '';
+        }
+      } else {
+        const editRes = await pool.query(
+          "SELECT value FROM cell_edits WHERE lot_id = $1 AND sheet_name = $2 AND row_idx = $3 AND col_idx = 'actual_serial_no'",
+          [lotId, sheet_name, parseInt(row_idx, 10)]
+        );
+        if (editRes.rows.length > 0) {
+          actualSerialVal = editRes.rows[0].value;
+        } else if (barcodeColIdx !== -1 && rows[row_idx]) {
+          actualSerialVal = rows[row_idx][barcodeColIdx] || '';
+        }
+      }
+
+      const mfgYear = extractMfgYear(actualSerialVal);
+      const scrapVal = mfgYear && mfgYear <= 2022 ? 'Yes' : 'No';
+
+      // Check if a scan log already exists for this row
+      let existingLog = null;
+      if (isFallback()) {
+        const logsList = memoryDb.tables.scan_logs || [];
+        existingLog = logsList.find(log => 
+          log.lot_id === lotId && log.sheet_name === sheet_name && Number(log.row_idx) === Number(row_idx)
+        );
+      } else {
+        const logRes = await pool.query(
+          "SELECT id FROM scan_logs WHERE lot_id = $1 AND sheet_name = $2 AND row_idx = $3",
+          [lotId, sheet_name, parseInt(row_idx, 10)]
+        );
+        if (logRes.rows.length > 0) {
+          existingLog = logRes.rows[0];
+        }
+      }
+
+      let nextBatchNum = 1;
+      if (isFallback()) {
+        const lotExports = (memoryDb.tables.export_history || []).filter(e => e.lot_id === lotId);
+        if (lotExports.length > 0) {
+          nextBatchNum = Math.max(...lotExports.map(e => e.export_number)) + 1;
+        }
+      } else {
+        const maxExportRes = await pool.query(
+          'SELECT COALESCE(MAX(export_number), 0) as max_val FROM export_history WHERE lot_id = $1',
+          [lotId]
+        );
+        nextBatchNum = parseInt(maxExportRes.rows[0].max_val, 10) + 1;
+      }
+
+      if (existingLog) {
+        if (isFallback()) {
+          existingLog.timestamp = new Date();
+          existingLog.actual_serial_no = actualSerialVal;
+          existingLog.mfg_year = mfgYear;
+          existingLog.scrap = scrapVal;
+          existingLog.scanned_by = (req.user && req.user.name) || 'Unknown';
+        } else {
+          await pool.query(
+            "UPDATE scan_logs SET timestamp = CURRENT_TIMESTAMP, actual_serial_no = $1, mfg_year = $2, scrap = $3, scanned_by = $4 WHERE id = $5",
+            [actualSerialVal, mfgYear, scrapVal, (req.user && req.user.name) || 'Unknown', existingLog.id]
+          );
+        }
+      } else {
+        if (isFallback()) {
+          memoryDb.tables.scan_logs.push({
+            lot_id: lotId,
+            sheet_name,
+            row_idx: parseInt(row_idx, 10),
+            dummy_sr_no: dummySrNo,
+            actual_serial_no: actualSerialVal,
+            mfg_year: mfgYear,
+            scrap: scrapVal,
+            scanned_by: (req.user && req.user.name) || 'Unknown',
+            session_export_batch: nextBatchNum,
+            timestamp: new Date()
+          });
+        } else {
+          await pool.query(`
+            INSERT INTO scan_logs (lot_id, sheet_name, row_idx, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, timestamp)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+          `, [
+            lotId,
+            sheet_name,
+            parseInt(row_idx, 10),
+            dummySrNo,
+            actualSerialVal,
+            mfgYear,
+            scrapVal,
+            (req.user && req.user.name) || 'Unknown',
+            nextBatchNum
+          ]);
         }
       }
     }
@@ -1184,7 +1357,7 @@ export const exportExcel = async (req, res) => {
     if (isFallback()) {
       lot = memoryDb.tables.lots.find(l => l.id === lotId);
     } else {
-      const lotRes = await pool.query('SELECT lot_no FROM lots WHERE id = $1', [lotId]);
+      const lotRes = await pool.query('SELECT * FROM lots WHERE id = $1', [lotId]);
       if (lotRes.rows.length > 0) {
         lot = lotRes.rows[0];
       }
@@ -1203,6 +1376,14 @@ export const exportExcel = async (req, res) => {
       cellEdits = editsRes.rows;
     }
 
+    const formatLocalTime = (dateInput) => {
+      if (!dateInput) return '';
+      const dObj = new Date(dateInput);
+      if (isNaN(dObj.getTime())) return String(dateInput);
+      const pad = (num) => String(num).padStart(2, '0');
+      return `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())} ${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
+    };
+
     // 3. Fetch Scan Logs
     let scanLogs = [];
     if (isFallback()) {
@@ -1210,14 +1391,17 @@ export const exportExcel = async (req, res) => {
         .filter(e => e.lot_id === lotId)
         .map(e => ({
           ...e,
-          timestamp: e.timestamp.toISOString().replace('T', ' ').substring(0, 19)
+          timestamp: formatLocalTime(e.timestamp)
         }));
     } else {
       const scansRes = await pool.query(
-        "SELECT to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch FROM scan_logs WHERE lot_id = $1 ORDER BY timestamp ASC",
+        "SELECT timestamp, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, sheet_name, row_idx FROM scan_logs WHERE lot_id = $1 ORDER BY timestamp ASC",
         [lotId]
       );
-      scanLogs = scansRes.rows;
+      scanLogs = scansRes.rows.map(s => ({
+        ...s,
+        timestamp: formatLocalTime(s.timestamp)
+      }));
     }
 
     // 4. Fetch Export History
@@ -1227,49 +1411,120 @@ export const exportExcel = async (req, res) => {
         .filter(e => e.lot_id === lotId)
         .map(e => ({
           ...e,
-          timestamp: e.timestamp.toISOString().replace('T', ' ').substring(0, 19)
+          timestamp: formatLocalTime(e.timestamp)
         }));
     } else {
       const histRes = await pool.query(
-        "SELECT export_number, to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp, exported_by, total_rows, scanned_count, unscanned_count, scrap_count, file_name FROM export_history WHERE lot_id = $1 ORDER BY export_number ASC",
+        "SELECT export_number, timestamp, exported_by, total_rows, scanned_count, unscanned_count, scrap_count, file_name FROM export_history WHERE lot_id = $1 ORDER BY export_number ASC",
         [lotId]
       );
-      exportHistory = histRes.rows;
+      exportHistory = histRes.rows.map(e => ({
+        ...e,
+        timestamp: formatLocalTime(e.timestamp)
+      }));
     }
+
+    const processSheets = (sheetsObj, logsList) => {
+      if (!sheetsObj) return {};
+      const processed = {};
+      Object.keys(sheetsObj).forEach(sheetName => {
+        const rows = sheetsObj[sheetName] || [];
+        if (rows.length === 0) {
+          processed[sheetName] = rows;
+          return;
+        }
+
+        const header = rows[0] || [];
+        let dateColIdx = -1;
+        let monthColIdx = -1;
+        for (let c = 0; c < header.length; c++) {
+          const val = String(header[c] || '').trim().toLowerCase();
+          if (val === 'date') dateColIdx = c;
+          if (val === 'month') monthColIdx = c;
+        }
+
+        const appendTime = (monthColIdx === -1);
+        const appendDate = (dateColIdx === -1);
+
+        const newRows = [];
+        for (let rIdx = 0; rIdx < rows.length; rIdx++) {
+          const row = [...rows[rIdx]];
+          if (rIdx === 0) {
+            if (monthColIdx !== -1) {
+              row[monthColIdx] = 'Time';
+            } else {
+              row.push('Time');
+            }
+            if (dateColIdx !== -1) {
+              row[dateColIdx] = 'Date';
+            } else {
+              row.push('Date');
+            }
+          } else {
+            const log = logsList.find(l => l.sheet_name === sheetName && Number(l.row_idx) === rIdx);
+            let scanDateStr = '';
+            let scanTimeStr = '';
+            if (log && log.timestamp) {
+              const parts = String(log.timestamp).split(' ');
+              if (parts.length === 2) {
+                scanDateStr = parts[0];
+                scanTimeStr = parts[1];
+              } else {
+                const dObj = new Date(log.timestamp);
+                if (!isNaN(dObj.getTime())) {
+                  const pad = (num) => String(num).padStart(2, '0');
+                  scanDateStr = `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())}`;
+                  scanTimeStr = `${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
+                }
+              }
+            }
+
+            if (monthColIdx !== -1) {
+              row[monthColIdx] = scanTimeStr || '-';
+            }
+            if (dateColIdx !== -1) {
+              if (scanDateStr) {
+                row[dateColIdx] = scanDateStr;
+              }
+            }
+
+            if (appendTime) {
+              row.push(scanTimeStr || '-');
+            }
+            if (appendDate) {
+              row.push(scanDateStr || '');
+            }
+          }
+          newRows.push(row);
+        }
+        processed[sheetName] = newRows;
+      });
+      return processed;
+    };
+
+    const processedSheets = processSheets(rawSheets, scanLogs);
 
     // 5. Compute Stats (Rule 3)
     let totalRows = 0;
-    let scannedCount = 0;
-    let scrapCount = 0;
-
-    Object.keys(rawSheets).forEach(sheetName => {
-      const rows = rawSheets[sheetName] || [];
+    Object.keys(processedSheets).forEach(sheetName => {
+      const rows = processedSheets[sheetName] || [];
       if (rows.length > 1) {
         totalRows += (rows.length - 1); // exclude header row
-        const { barcodeColIdx } = findColumnIndices(rows);
-        const sheetEdits = cellEdits.filter(e => e.sheet_name === sheetName);
-
-        for (let rIdx = 1; rIdx < rows.length; rIdx++) {
-          const row = rows[rIdx];
-          let actualBarcode = '';
-          const edit = sheetEdits.find(e => parseInt(e.row_idx, 10) === rIdx && String(e.col_idx) === 'actual_serial_no');
-          if (edit) {
-            actualBarcode = edit.value;
-          } else if (barcodeColIdx !== -1 && barcodeColIdx < row.length) {
-            actualBarcode = row[barcodeColIdx];
-          }
-
-          actualBarcode = String(actualBarcode || '').trim();
-          if (actualBarcode && actualBarcode !== '-') {
-            scannedCount++;
-            const mfgYear = extractMfgYear(actualBarcode);
-            if (mfgYear && mfgYear <= 2022) {
-              scrapCount++;
-            }
-          }
-        }
       }
     });
+
+    const scannedCount = scanLogs.length;
+
+    // Count scrap count from scanLogs
+    let scrapCount = 0;
+    scanLogs.forEach(log => {
+      const mfgYear = log.mfg_year || extractMfgYear(log.actual_serial_no);
+      const scrapThreshold = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2022;
+      if (mfgYear && mfgYear <= scrapThreshold) {
+        scrapCount++;
+      }
+    });
+
     const unscannedCount = totalRows - scannedCount;
 
     // 6. Get Next Export Number (Rule 3)
@@ -1283,11 +1538,13 @@ export const exportExcel = async (req, res) => {
     const HHMM = d.getHours().toString().padStart(2, '0') + d.getMinutes().toString().padStart(2, '0');
     const filename = `LotNo${lotNo}_Export${nextExportNum}_${YYYYMMDD}_${HHMM}.xlsx`;
 
+    const localTimestampStr = formatLocalTime(d);
+
     // 8. Log the new export entry (Rule 3)
     const newExportLog = {
       lot_id: lotId,
       export_number: nextExportNum,
-      timestamp: new Date(),
+      timestamp: d,
       exported_by: (req.user && req.user.name) || 'Unknown',
       total_rows: totalRows,
       scanned_count: scannedCount,
@@ -1317,7 +1574,7 @@ export const exportExcel = async (req, res) => {
     // Append current export to the history list for python script sheet creation
     const currentExportFormatted = {
       ...newExportLog,
-      timestamp: newExportLog.timestamp.toISOString().replace('T', ' ').substring(0, 19)
+      timestamp: localTimestampStr
     };
     exportHistory.push(currentExportFormatted);
 
@@ -1327,10 +1584,13 @@ export const exportExcel = async (req, res) => {
 
     const pyInput = {
       dest_file_path: pyOutputPath,
-      raw_sheets: rawSheets,
+      raw_sheets: processedSheets,
       cell_edits: cellEdits,
       scan_logs: scanLogs,
-      export_history: exportHistory
+      export_history: exportHistory,
+      scrap_year_threshold: lot ? lot.scrap_year_threshold : null,
+      separate_year_threshold: lot ? lot.separate_year_threshold : null,
+      checkbox_year_threshold: lot ? lot.checkbox_year_threshold : null
     };
 
     fs.writeFileSync(pyInputPath, JSON.stringify(pyInput, null, 2), 'utf8');
@@ -1363,6 +1623,59 @@ export const exportExcel = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Internal server error during Excel export." });
+  }
+};
+
+export const saveLotRules = async (req, res) => {
+  const { id } = req.params;
+  const lotId = parseInt(id, 10);
+  const { scrap_year_threshold, separate_year_threshold, checkbox_year_threshold } = req.body;
+
+  if (isNaN(lotId)) {
+    return res.status(400).json({ error: "Invalid lot ID." });
+  }
+
+  try {
+    const lot = await Lot.findById(lotId);
+    if (!lot) {
+      return res.status(404).json({ error: "Lot not found." });
+    }
+
+
+
+    const updated = await Lot.updateRules(lotId, {
+      scrap_year_threshold: scrap_year_threshold !== undefined && scrap_year_threshold !== '' ? parseInt(scrap_year_threshold, 10) : null,
+      separate_year_threshold: separate_year_threshold !== undefined && separate_year_threshold !== '' ? parseInt(separate_year_threshold, 10) : null,
+      checkbox_year_threshold: checkbox_year_threshold !== undefined && checkbox_year_threshold !== '' ? parseInt(checkbox_year_threshold, 10) : null
+    });
+
+    res.json(updated);
+  } catch (err) {
+    console.error('Error saving lot rules:', err);
+    res.status(500).json({ error: "Failed to save lot rules." });
+  }
+};
+
+export const saveLotStatus = async (req, res) => {
+  const { id } = req.params;
+  const lotId = parseInt(id, 10);
+  const { status } = req.body;
+
+  if (isNaN(lotId) || !status) {
+    return res.status(400).json({ error: "Invalid lot ID or status." });
+  }
+
+  try {
+    const lot = await Lot.findById(lotId);
+    if (!lot) {
+      return res.status(404).json({ error: "Lot not found." });
+    }
+
+    const updated = await Lot.updateStatus(lotId, status);
+    res.json(updated);
+  } catch (err) {
+    console.error('Error saving lot status:', err);
+    res.status(500).json({ error: "Failed to update lot status." });
   }
 };
 

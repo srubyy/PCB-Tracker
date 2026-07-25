@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, Package, Wrench, ShieldCheck, Trophy, Users } from 'lucide-react';
+import { LayoutDashboard, Package, Wrench, ShieldCheck, Trophy, Users, FileSpreadsheet } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 
 const BottomNavigation = ({ view, setView }) => {
@@ -26,6 +26,15 @@ const BottomNavigation = ({ view, setView }) => {
           Stock
         </button>
       )}
+      {user.role !== 'Employee' && (
+        <button 
+          onClick={() => setView('setup')} 
+          className={`nav-item ${view === 'setup' ? 'active' : ''}`}
+        >
+          <FileSpreadsheet />
+          Lot Setup
+        </button>
+      )}
       <button 
         onClick={() => setView('repair')} 
         className={`nav-item ${view === 'repair' ? 'active' : ''}`}
@@ -44,7 +53,7 @@ const BottomNavigation = ({ view, setView }) => {
         Trophy
       </button>
 
-      {user.role === 'Superadmin' && (
+      {['Superadmin', 'Manager', 'Team Lead'].includes(user.role) && (
         <button 
           onClick={() => setView('users')} 
           className={`nav-item ${view === 'users' ? 'active' : ''}`}

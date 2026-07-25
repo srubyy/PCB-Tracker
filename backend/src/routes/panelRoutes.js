@@ -1,7 +1,7 @@
 import express from 'express';
 import { 
   getPanels, searchPanel, assignPanel, progressRepair, importPanels, patchPanel, deletePanel, createPanel, clearLotPanels,
-  uploadExcel, getExcelData, saveCellEdit, exportExcel
+  uploadExcel, getExcelData, saveCellEdit, exportExcel, saveLotRules, saveLotStatus
 } from '../controllers/panelController.js';
 import { authenticateJWT, authorize } from '../middlewares/authMiddleware.js';
 
@@ -18,7 +18,9 @@ router.delete('/panels/clear', authenticateJWT, authorize(['Superadmin', 'Manage
 router.delete('/panels/:id', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), deletePanel);
 
 // Excel raw sheet exact import endpoints
-router.post('/lots/:id/upload-excel', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), uploadExcel);
+router.post('/lots/:id/upload-excel', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead']), uploadExcel);
+router.put('/lots/:id/rules', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead']), saveLotRules);
+router.put('/lots/:id/status', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead']), saveLotStatus);
 router.get('/lots/:id/excel-data', authenticateJWT, getExcelData);
 router.post('/lots/:id/cell-edit', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), saveCellEdit);
 router.get('/lots/:id/export-excel', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), exportExcel);

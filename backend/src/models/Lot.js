@@ -71,10 +71,40 @@ export const Lot = {
       return memoryDb.createLot(lot);
     }
     const res = await db.query(
-      `INSERT INTO lots (lot_no, batch_no, pixel_pitch, client_id, qty_sent, received_qty, remarks) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7) 
+      `INSERT INTO lots (lot_no, batch_no, pixel_pitch, client_id, qty_sent, received_qty, remarks, scrap_year_threshold, separate_year_threshold, checkbox_year_threshold, created_by, status) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12) 
        RETURNING *`,
-      [lot.lot_no, lot.batch_no, lot.pixel_pitch, lot.client_id, lot.qty_sent, lot.received_qty, lot.remarks]
+      [
+        lot.lot_no, 
+        lot.batch_no, 
+        lot.pixel_pitch, 
+        lot.client_id, 
+        lot.qty_sent, 
+        lot.received_qty, 
+        lot.remarks,
+        lot.scrap_year_threshold || null,
+        lot.separate_year_threshold || null,
+        lot.checkbox_year_threshold || null,
+        lot.created_by || null,
+        lot.status || 'Draft'
+      ]
+    );
+    return res.rows[0];
+  },
+
+  async updateRules(id, rules, clientTransaction = null) {
+    const db = clientTransaction || pool;
+    if (isFallback()) {
+      return memoryDb.updateLotRules(Number(id), rules);
+    }
+    const res = await db.query(
+      `UPDATE lots 
+       SET scrap_year_threshold = $1, 
+           separate_year_threshold = $2, 
+           checkbox_year_threshold = $3 
+       WHERE id = $4 
+       RETURNING *`,
+      [rules.scrap_year_threshold, rules.separate_year_threshold, rules.checkbox_year_threshold, id]
     );
     return res.rows[0];
   },
