@@ -2,6 +2,8 @@ import jwt from 'jsonwebtoken';
 import bcrypt from 'bcryptjs';
 import { User } from '../models/User.js';
 import { OAuth2Client } from 'google-auth-library';
+import pool, { isFallback } from '../config/db.js';
+import * as memoryDb from '../services/memoryDb.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecretactivationkey2026!';
 const JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'evenmoresecretrefreshkey2026!';
@@ -132,14 +134,37 @@ export const loginWithGoogle = async (req, res) => {
 
     let user = await User.findByEmail(email);
     if (!user) {
+      let baseName = name || email.split('@')[0];
+      let uniqueName = baseName;
+      let counter = 1;
+
+      while (true) {
+        let existingByName = null;
+        if (isFallback()) {
+          existingByName = memoryDb.tables.users.find(u => u.name.toLowerCase() === uniqueName.toLowerCase());
+        } else {
+          const nameCheck = await pool.query('SELECT id FROM users WHERE LOWER(name) = LOWER($1)', [uniqueName]);
+          if (nameCheck.rows.length > 0) {
+            existingByName = nameCheck.rows[0];
+          }
+        }
+
+        if (!existingByName) {
+          break;
+        }
+
+        uniqueName = `${baseName} (${counter})`;
+        counter++;
+      }
+
       // Auto-create user with Employee role
       user = await User.create({
-        name: name || email.split('@')[0],
+        name: uniqueName,
         email: email,
         password_hash: '', // No local password
         role: 'Employee',
         attendance_rate: 100, // default
-        avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(name || email)}`
+        avatar: `https://api.dicebear.com/7.x/adventurer/svg?seed=${encodeURIComponent(uniqueName)}`
       });
     }
 
@@ -172,6 +197,6 @@ export const loginWithGoogle = async (req, res) => {
     });
   } catch (err) {
     console.error('Google login error:', err);
-    res.status(401).json({ error: "Google authentication failed. Please try again." });
+    res.status(401).json({ error: `Google login failed: ${err.message}` });
   }
 };
