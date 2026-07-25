@@ -111,7 +111,7 @@ export const logout = async (req, res) => {
   }
 };
 
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '988396310523-21uvb3ke8jmtbk7o6alblq5ftd0mb91d.apps.googleusercontent.com';
+const GOOGLE_CLIENT_ID = String(process.env.GOOGLE_CLIENT_ID || '988396310523-21uvb3ke8jmtbk7o6alblq5ftd0mb91d.apps.googleusercontent.com').replace(/['"]/g, '').trim();
 const googleClient = new OAuth2Client(GOOGLE_CLIENT_ID);
 
 export const loginWithGoogle = async (req, res) => {
