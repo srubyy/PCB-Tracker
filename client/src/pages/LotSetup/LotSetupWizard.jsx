@@ -190,7 +190,8 @@ const LotSetupWizard = ({ showToast, apiFetch, onRefreshLots }) => {
     const formData = new FormData();
     formData.append('file', file);
     try {
-      const res = await fetch(`/api/lots/${selectedLotId}/upload-excel`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${API_BASE_URL}/api/lots/${selectedLotId}/upload-excel`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${sessionStorage.getItem('es_access_token') || ''}`
@@ -199,7 +200,7 @@ const LotSetupWizard = ({ showToast, apiFetch, onRefreshLots }) => {
       });
       if (res.ok) {
         showToast('Excel file uploaded successfully! Fetching preview...');
-        const previewRes = await fetch(`/api/lots/${selectedLotId}/excel-data`, {
+        const previewRes = await fetch(`${API_BASE_URL}/api/lots/${selectedLotId}/excel-data`, {
           headers: {
             'Authorization': `Bearer ${sessionStorage.getItem('es_access_token') || ''}`
           }

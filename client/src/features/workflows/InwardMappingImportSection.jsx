@@ -343,7 +343,8 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         headers['Authorization'] = `Bearer ${token}`;
       }
 
-      const res = await fetch(`/api/lots/${lotId}/upload-excel`, {
+      const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+      const res = await fetch(`${API_BASE_URL}/api/lots/${lotId}/upload-excel`, {
         method: 'POST',
         headers,
         body: file

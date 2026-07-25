@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
@@ -22,7 +23,7 @@ export const AuthProvider = ({ children }) => {
   // Login handler
   const login = async (email, password) => {
     try {
-      const res = await fetch('/api/auth/login', {
+      const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -51,7 +52,7 @@ export const AuthProvider = ({ children }) => {
   const logout = async () => {
     try {
       if (accessToken) {
-        await fetch('/api/auth/logout', {
+        await fetch(`${API_BASE_URL}/api/auth/logout`, {
           method: 'POST',
           headers: { 
             'Authorization': `Bearer ${accessToken}`,
@@ -92,7 +93,7 @@ export const AuthProvider = ({ children }) => {
     };
 
     // 2. Perform request
-    let res = await fetch(url, fetchOptions);
+    let res = await fetch(url.startsWith('/api/') ? `${API_BASE_URL}${url}` : url, fetchOptions);
 
     // 3. Handle token expiry (401)
     if (res.status === 401) {
@@ -107,7 +108,7 @@ export const AuthProvider = ({ children }) => {
 
       try {
         // Attempt silent refresh
-        const refreshRes = await fetch('/api/auth/refresh', {
+        const refreshRes = await fetch(`${API_BASE_URL}/api/auth/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ refreshToken: storedRefreshToken })
@@ -124,7 +125,7 @@ export const AuthProvider = ({ children }) => {
 
           // 4. Retry original request with new access token
           headers['Authorization'] = `Bearer ${refreshData.accessToken}`;
-          res = await fetch(url, {
+          res = await fetch(url.startsWith('/api/') ? `${API_BASE_URL}${url}` : url, {
             ...options,
             headers
           });
