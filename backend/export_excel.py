@@ -115,8 +115,7 @@ def generate_excel(json_data):
                 "Actual Serial No",
                 "Length of Actual Serial No",
                 "Mfg Year",
-                "Scrap",
-                "Repairable"
+                "Action"
             ]
             
             for i, v_h in enumerate(virtual_headers):
@@ -145,14 +144,16 @@ def generate_excel(json_data):
                 barcode_length = len(actual_barcode) if actual_barcode else 0
                 calculated_year = extract_mfg_year(actual_barcode)
                 
-                scrap_status = '-'
-                if calculated_year:
-                    scrap_status = 'SCRAP' if calculated_year <= 2022 else '-'
-                    
                 repairable_val = 'No'
                 for edit in sheet_edits:
                     if int(edit['row_idx']) == r_idx and String_Match(edit['col_idx'], 'repairable'):
                         repairable_val = 'Yes' if edit['value'] == 'true' else 'No'
+                
+                action_val = '-'
+                if calculated_year and calculated_year <= 2022:
+                    action_val = 'Scrap'
+                elif repairable_val == 'Yes':
+                    action_val = 'Repairable'
                 
                 # Format calculated year
                 year_display = str(calculated_year) if calculated_year else ''
@@ -162,8 +163,7 @@ def generate_excel(json_data):
                     actual_barcode,
                     barcode_length,
                     year_display,
-                    scrap_status,
-                    repairable_val
+                    action_val
                 ]
                 
                 for i, val in enumerate(virtual_values):
@@ -216,7 +216,7 @@ def generate_excel(json_data):
             val = str(cell.value or '')
             
             # Format virtual headers differently
-            if is_orig_sheet and val in ["Actual Serial No", "Length of Actual Serial No", "Mfg Year", "Scrap", "Repairable"]:
+            if is_orig_sheet and val in ["Actual Serial No", "Length of Actual Serial No", "Mfg Year", "Action"]:
                 cell.fill = virtual_fill
                 cell.font = virtual_font
             else:
