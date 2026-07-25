@@ -447,6 +447,21 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
             background: rgba(var(--color-primary-rgb), 0.1) !important;
             outline: 1px dashed var(--color-primary) !important;
           }
+          .excel-table tr.highlighted-row td {
+            border-top: 2px solid #ffc107 !important;
+            border-bottom: 2px solid #ffc107 !important;
+            background: rgba(255, 193, 7, 0.12) !important;
+          }
+          .excel-table tr.highlighted-row td:first-child {
+            border-left: 2px solid #ffc107 !important;
+            border-top-left-radius: 4px;
+            border-bottom-left-radius: 4px;
+          }
+          .excel-table tr.highlighted-row td:last-child {
+            border-right: 2px solid #ffc107 !important;
+            border-top-right-radius: 4px;
+            border-bottom-right-radius: 4px;
+          }
         `}</style>
         
         {/* Header toolbar */}
@@ -536,6 +551,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                   <tr
                     key={rIdx}
                     id={`excel-row-${rIdx}`}
+                    className={isHighlighted ? 'highlighted-row' : ''}
                     style={{
                       borderBottom: '1px solid rgba(255,255,255,0.02)',
                       background: isHighlighted 
