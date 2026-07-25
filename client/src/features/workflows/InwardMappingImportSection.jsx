@@ -314,7 +314,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
       const filtered = prev.filter(e => 
         !(e.sheet_name === sheetName && e.row_idx === rowIdx && String(e.col_idx) === String(colIdx))
       );
-      return [...filtered, { sheet_name: sheetName, row_idx: rowIdx, col_idx: String(col_idx), value }];
+      return [...filtered, { sheet_name: sheetName, row_idx: rowIdx, col_idx: String(colIdx), value }];
     });
 
     try {
@@ -598,6 +598,24 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                         return (
                           <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 700, textAlign: 'center' }}>
                             {calculatedYear || ''}
+                          </td>
+                        );
+                      }
+
+                      // Hijack cell if it represents 'Scrap' status (read-only)
+                      if (col.index === 'scrap') {
+                        const isScrap = calculatedYear && calculatedYear <= 2022;
+                        return (
+                          <td
+                            key={cIdx}
+                            style={{
+                              padding: '6px 12px',
+                              fontWeight: 700,
+                              textAlign: 'center',
+                              color: isScrap ? '#dc3545' : 'var(--color-primary)'
+                            }}
+                          >
+                            {isScrap ? 'Scrap' : '-'}
                           </td>
                         );
                       }
