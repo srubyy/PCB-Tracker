@@ -1156,12 +1156,21 @@ export const saveCellEdit = async (req, res) => {
         memoryDb.tables.cell_edits.push(editObj);
       }
     } else {
-      await pool.query(`
-        INSERT INTO cell_edits (lot_id, sheet_name, row_idx, col_idx, value)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (lot_id, sheet_name, row_idx, col_idx)
-        DO UPDATE SET value = EXCLUDED.value
-      `, [lotId, sheet_name, row_idx, String(col_idx), value]);
+      const existing = await pool.query(
+        'SELECT id FROM cell_edits WHERE lot_id = $1 AND sheet_name = $2 AND row_idx = $3 AND col_idx = $4',
+        [lotId, sheet_name, parseInt(row_idx, 10), String(col_idx)]
+      );
+      if (existing.rows.length > 0) {
+        await pool.query(
+          'UPDATE cell_edits SET value = $1 WHERE id = $2',
+          [value, existing.rows[0].id]
+        );
+      } else {
+        await pool.query(
+          'INSERT INTO cell_edits (lot_id, sheet_name, row_idx, col_idx, value) VALUES ($1, $2, $3, $4, $5)',
+          [lotId, sheet_name, parseInt(row_idx, 10), String(col_idx), value]
+        );
+      }
     }
 
     const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
@@ -1660,7 +1669,7 @@ export const exportExcel = async (req, res) => {
         if (calculatedYear) {
           if (calculatedYear <= scrapYear) {
             actionVal = 'Scrap';
-          } else if (lot.separate_year_threshold !== null && calculatedYear === sepYear) {
+          } else if (lot && lot.separate_year_threshold !== null && calculatedYear === sepYear) {
             actionVal = 'Separate';
           } else if (calculatedYear >= chkYear) {
             actionVal = (repairableVal === 'Yes') ? 'Repairable' : 'Non-Repairable';
