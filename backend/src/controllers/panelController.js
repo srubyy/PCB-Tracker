@@ -1102,6 +1102,57 @@ export const saveCellEdit = async (req, res) => {
             await pool.query(`UPDATE panels SET ${setClause} WHERE id = $${keys.length + 1}`, [...vals, pId]);
           }
         }
+
+        // Cumulative scan log tracking (Rule 4)
+        if (updateField === 'real_sr_no' && updateValue && updateValue.trim().length >= 12) {
+          let nextBatchNum = 1;
+          if (isFallback()) {
+            const lotExports = memoryDb.tables.export_history.filter(e => e.lot_id === lotId);
+            if (lotExports.length > 0) {
+              nextBatchNum = Math.max(...lotExports.map(e => e.export_number)) + 1;
+            }
+          } else {
+            const maxExportRes = await pool.query(
+              'SELECT COALESCE(MAX(export_number), 0) as max_val FROM export_history WHERE lot_id = $1',
+              [lotId]
+            );
+            nextBatchNum = parseInt(maxExportRes.rows[0].max_val, 10) + 1;
+          }
+
+          const dummySrNo = rows[row_idx] && dummyColIdx !== -1 ? rows[row_idx][dummyColIdx] : '';
+          const mfgYear = extractMfgYear(updateValue);
+          const scrapVal = mfgYear && mfgYear <= 2022 ? 'Yes' : 'No';
+
+          if (isFallback()) {
+            memoryDb.tables.scan_logs.push({
+              lot_id: lotId,
+              sheet_name,
+              row_idx: parseInt(row_idx, 10),
+              dummy_sr_no: dummySrNo,
+              actual_serial_no: updateValue,
+              mfg_year: mfgYear,
+              scrap: scrapVal,
+              scanned_by: (req.user && req.user.name) || 'Unknown',
+              session_export_batch: nextBatchNum,
+              timestamp: new Date()
+            });
+          } else {
+            await pool.query(`
+              INSERT INTO scan_logs (lot_id, sheet_name, row_idx, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, timestamp)
+              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, CURRENT_TIMESTAMP)
+            `, [
+              lotId,
+              sheet_name,
+              parseInt(row_idx, 10),
+              dummySrNo,
+              updateValue,
+              mfgYear,
+              scrapVal,
+              (req.user && req.user.name) || 'Unknown',
+              nextBatchNum
+            ]);
+          }
+        }
       }
     }
 
@@ -1109,6 +1160,209 @@ export const saveCellEdit = async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Failed to save cell edit." });
+  }
+};
+
+export const exportExcel = async (req, res) => {
+  const { id } = req.params;
+  const lotId = parseInt(id, 10);
+
+  if (isNaN(lotId)) {
+    return res.status(400).json({ error: "Invalid lot ID." });
+  }
+
+  try {
+    const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+    if (!fs.existsSync(finalJsonPath)) {
+      return res.status(400).json({ error: "No spreadsheet uploaded for this lot yet." });
+    }
+
+    const rawSheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
+
+    // 1. Fetch Lot Info
+    let lot = null;
+    if (isFallback()) {
+      lot = memoryDb.tables.lots.find(l => l.id === lotId);
+    } else {
+      const lotRes = await pool.query('SELECT lot_no FROM lots WHERE id = $1', [lotId]);
+      if (lotRes.rows.length > 0) {
+        lot = lotRes.rows[0];
+      }
+    }
+    const lotNo = lot ? lot.lot_no : lotId;
+
+    // 2. Fetch Cell Edits
+    let cellEdits = [];
+    if (isFallback()) {
+      cellEdits = memoryDb.tables.cell_edits.filter(e => e.lot_id === lotId);
+    } else {
+      const editsRes = await pool.query(
+        'SELECT sheet_name, row_idx, col_idx, value FROM cell_edits WHERE lot_id = $1',
+        [lotId]
+      );
+      cellEdits = editsRes.rows;
+    }
+
+    // 3. Fetch Scan Logs
+    let scanLogs = [];
+    if (isFallback()) {
+      scanLogs = memoryDb.tables.scan_logs
+        .filter(e => e.lot_id === lotId)
+        .map(e => ({
+          ...e,
+          timestamp: e.timestamp.toISOString().replace('T', ' ').substring(0, 19)
+        }));
+    } else {
+      const scansRes = await pool.query(
+        "SELECT to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch FROM scan_logs WHERE lot_id = $1 ORDER BY timestamp ASC",
+        [lotId]
+      );
+      scanLogs = scansRes.rows;
+    }
+
+    // 4. Fetch Export History
+    let exportHistory = [];
+    if (isFallback()) {
+      exportHistory = memoryDb.tables.export_history
+        .filter(e => e.lot_id === lotId)
+        .map(e => ({
+          ...e,
+          timestamp: e.timestamp.toISOString().replace('T', ' ').substring(0, 19)
+        }));
+    } else {
+      const histRes = await pool.query(
+        "SELECT export_number, to_char(timestamp, 'YYYY-MM-DD HH24:MI:SS') as timestamp, exported_by, total_rows, scanned_count, unscanned_count, scrap_count, file_name FROM export_history WHERE lot_id = $1 ORDER BY export_number ASC",
+        [lotId]
+      );
+      exportHistory = histRes.rows;
+    }
+
+    // 5. Compute Stats (Rule 3)
+    let totalRows = 0;
+    let scannedCount = 0;
+    let scrapCount = 0;
+
+    Object.keys(rawSheets).forEach(sheetName => {
+      const rows = rawSheets[sheetName] || [];
+      if (rows.length > 1) {
+        totalRows += (rows.length - 1); // exclude header row
+        const { barcodeColIdx } = findColumnIndices(rows);
+        const sheetEdits = cellEdits.filter(e => e.sheet_name === sheetName);
+
+        for (let rIdx = 1; rIdx < rows.length; rIdx++) {
+          const row = rows[rIdx];
+          let actualBarcode = '';
+          const edit = sheetEdits.find(e => parseInt(e.row_idx, 10) === rIdx && String(e.col_idx) === 'actual_serial_no');
+          if (edit) {
+            actualBarcode = edit.value;
+          } else if (barcodeColIdx !== -1 && barcodeColIdx < row.length) {
+            actualBarcode = row[barcodeColIdx];
+          }
+
+          actualBarcode = String(actualBarcode || '').trim();
+          if (actualBarcode && actualBarcode !== '-') {
+            scannedCount++;
+            const mfgYear = extractMfgYear(actualBarcode);
+            if (mfgYear && mfgYear <= 2022) {
+              scrapCount++;
+            }
+          }
+        }
+      }
+    });
+    const unscannedCount = totalRows - scannedCount;
+
+    // 6. Get Next Export Number (Rule 3)
+    const nextExportNum = exportHistory.length > 0 
+      ? Math.max(...exportHistory.map(e => parseInt(e.export_number, 10))) + 1 
+      : 1;
+
+    // 7. Formulate Filename (Rule 5)
+    const d = new Date();
+    const YYYYMMDD = d.getFullYear().toString() + (d.getMonth() + 1).toString().padStart(2, '0') + d.getDate().toString().padStart(2, '0');
+    const HHMM = d.getHours().toString().padStart(2, '0') + d.getMinutes().toString().padStart(2, '0');
+    const filename = `LotNo${lotNo}_Export${nextExportNum}_${YYYYMMDD}_${HHMM}.xlsx`;
+
+    // 8. Log the new export entry (Rule 3)
+    const newExportLog = {
+      lot_id: lotId,
+      export_number: nextExportNum,
+      timestamp: new Date(),
+      exported_by: (req.user && req.user.name) || 'Unknown',
+      total_rows: totalRows,
+      scanned_count: scannedCount,
+      unscanned_count: unscannedCount,
+      scrap_count: scrapCount,
+      file_name: filename
+    };
+
+    if (isFallback()) {
+      memoryDb.tables.export_history.push(newExportLog);
+    } else {
+      await pool.query(`
+        INSERT INTO export_history (lot_id, export_number, exported_by, total_rows, scanned_count, unscanned_count, scrap_count, file_name, timestamp)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, CURRENT_TIMESTAMP)
+      `, [
+        lotId,
+        nextExportNum,
+        newExportLog.exported_by,
+        totalRows,
+        scannedCount,
+        unscannedCount,
+        scrapCount,
+        filename
+      ]);
+    }
+
+    // Append current export to the history list for python script sheet creation
+    const currentExportFormatted = {
+      ...newExportLog,
+      timestamp: newExportLog.timestamp.toISOString().replace('T', ' ').substring(0, 19)
+    };
+    exportHistory.push(currentExportFormatted);
+
+    // 9. Run python exporter script
+    const pyInputPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_export_payload.json`);
+    const pyOutputPath = path.join(process.cwd(), 'uploads', filename);
+
+    const pyInput = {
+      dest_file_path: pyOutputPath,
+      raw_sheets: rawSheets,
+      cell_edits: cellEdits,
+      scan_logs: scanLogs,
+      export_history: exportHistory
+    };
+
+    fs.writeFileSync(pyInputPath, JSON.stringify(pyInput, null, 2), 'utf8');
+
+    const pyPath = path.join(process.cwd(), '.venv', 'bin', 'python');
+    let scriptPath = path.join(process.cwd(), 'export_excel.py');
+    if (!fs.existsSync(scriptPath)) {
+      scriptPath = path.join(process.cwd(), 'backend', 'export_excel.py');
+    }
+
+    exec(`"${pyPath}" "${scriptPath}" "${pyInputPath}"`, { maxBuffer: 50 * 1024 * 1024 }, (pyErr, pyStdout, pyStderr) => {
+      try { fs.unlinkSync(pyInputPath); } catch (e) {}
+
+      if (pyErr) {
+        console.error("Python export script error:", pyErr, pyStderr);
+        return res.status(500).json({ error: "Failed to generate Excel file." });
+      }
+
+      // Stream the generated file to client and delete after completion
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+      res.sendFile(pyOutputPath, (sendErr) => {
+        try { fs.unlinkSync(pyOutputPath); } catch (e) {}
+        if (sendErr) {
+          console.error("File download streaming error:", sendErr);
+        }
+      });
+    });
+
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Internal server error during Excel export." });
   }
 };
 

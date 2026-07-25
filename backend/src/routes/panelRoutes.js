@@ -1,7 +1,6 @@
-import express from 'express';
 import { 
   getPanels, searchPanel, assignPanel, progressRepair, importPanels, patchPanel, deletePanel, createPanel, clearLotPanels,
-  uploadExcel, getExcelData, saveCellEdit
+  uploadExcel, getExcelData, saveCellEdit, exportExcel
 } from '../controllers/panelController.js';
 import { authenticateJWT, authorize } from '../middlewares/authMiddleware.js';
 
@@ -21,5 +20,6 @@ router.delete('/panels/:id', authenticateJWT, authorize(['Superadmin', 'Manager'
 router.post('/lots/:id/upload-excel', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), uploadExcel);
 router.get('/lots/:id/excel-data', authenticateJWT, getExcelData);
 router.post('/lots/:id/cell-edit', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), saveCellEdit);
+router.get('/lots/:id/export-excel', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead', 'Employee']), exportExcel);
 
 export default router;

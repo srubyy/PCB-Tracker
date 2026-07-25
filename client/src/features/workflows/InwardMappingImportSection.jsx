@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { FileSpreadsheet, Trash2, Plus, X, ArrowDown } from 'lucide-react';
+import { FileSpreadsheet, Trash2, Plus, X, ArrowDown, Download } from 'lucide-react';
 
 const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) => {
   // Spreadsheet States
@@ -446,6 +446,56 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     }
   };
 
+  // Trigger Dynamic Excel Export download
+  const handleExportSpreadsheet = async () => {
+    setLoading(true);
+    try {
+      const token = localStorage.getItem('accessToken');
+      const response = await fetch(`/api/lots/${lotId}/export-excel`, {
+        method: 'GET',
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || 'Failed to export spreadsheet.');
+      }
+
+      // Read Content-Disposition header to get filename
+      const contentDisposition = response.headers.get('content-disposition');
+      let filename = `LotNo${lotId}_Export.xlsx`;
+      if (contentDisposition) {
+        const matches = contentDisposition.match(/filename="?([^"]+)"?/);
+        if (matches && matches[1]) {
+          filename = matches[1];
+        }
+      }
+
+      // Convert response stream to blob and download
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', filename);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.URL.revokeObjectURL(url);
+      
+      showToast(`Spreadsheet exported successfully as ${filename}!`, 'success');
+      
+      // Reload excel data to fetch updated export history overlays
+      loadExcelData();
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || 'Error exporting spreadsheet.', 'danger');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sheetNames = Object.keys(excelSheets);
   const activeSheetRows = excelSheets[activeSheetName] || [];
 
@@ -515,14 +565,25 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
               Rendered exactly as-is. Click any cell to edit inline. Edits save dynamically.
             </span>
           </div>
-          <button
-            type="button"
-            className="btn btn-secondary"
-            onClick={handleClearLot}
-            style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: '0.72rem', background: '#dc3545', color: '#fff', border: 'none' }}
-          >
-            <X size={14} /> Clear Spreadsheet
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-primary"
+              onClick={handleExportSpreadsheet}
+              disabled={loading}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: '0.72rem', background: 'var(--color-primary)', color: '#000', border: 'none', fontWeight: 'bold' }}
+            >
+              <Download size={14} /> Export Spreadsheet
+            </button>
+            <button
+              type="button"
+              className="btn btn-secondary"
+              onClick={handleClearLot}
+              style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '6px 12px', fontSize: '0.72rem', background: '#dc3545', color: '#fff', border: 'none' }}
+            >
+              <X size={14} /> Clear Spreadsheet
+            </button>
+          </div>
         </div>
 
         {/* Sheet Tabs */}

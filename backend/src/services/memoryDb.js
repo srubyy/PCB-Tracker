@@ -28,7 +28,9 @@ export const tables = {
   lot_transactions: [],
   production_logs: [],
   pending_production_logs: [],
-  cell_edits: []
+  cell_edits: [],
+  scan_logs: [],
+  export_history: []
 };
 
 // --- Seed Parsing Helpers ---
