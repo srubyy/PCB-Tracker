@@ -1067,6 +1067,9 @@ export const saveCellEdit = async (req, res) => {
         updateField = 'real_sr_no';
       } else if (String(col_idx) === 'box_no') {
         updateField = 'box_no';
+      } else if (String(col_idx) === 'repairable') {
+        updateField = 'repairable';
+        updateValue = (value === 'true');
       }
 
       if (updateField) {

@@ -462,6 +462,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
       columns.push({ index: 'barcode_length', type: 'barcode_length', label: 'Length of Actual Serial No' });
       columns.push({ index: 'calculated_mfg_year', type: 'calculated_mfg_year', label: 'Mfg Year' });
       columns.push({ index: 'scrap', type: 'scrap', label: 'Scrap' });
+      columns.push({ index: 'repairable', type: 'repairable', label: 'Repairable' });
     }
   }
 
@@ -471,6 +472,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     columns.push({ index: 'barcode_length', type: 'barcode_length', label: 'Length of Actual Serial No' });
     columns.push({ index: 'calculated_mfg_year', type: 'calculated_mfg_year', label: 'Mfg Year' });
     columns.push({ index: 'scrap', type: 'scrap', label: 'Scrap' });
+    columns.push({ index: 'repairable', type: 'repairable', label: 'Repairable' });
   }
 
   // Render spreadsheet view when sheets exist
@@ -565,9 +567,9 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                     key={idx}
                     style={{
                       padding: '8px 12px',
-                      minWidth: col.type === 'actual_serial_no' ? 190 : col.type === 'barcode_length' ? 160 : col.type === 'calculated_mfg_year' ? 95 : col.type === 'scrap' ? 95 : 110,
-                      background: ['actual_serial_no', 'barcode_length', 'calculated_mfg_year', 'scrap'].includes(col.type) ? 'rgba(var(--color-primary-rgb), 0.05)' : 'transparent',
-                      color: ['actual_serial_no', 'barcode_length', 'calculated_mfg_year', 'scrap'].includes(col.type) ? 'var(--color-primary)' : 'var(--text-main)',
+                      minWidth: col.type === 'actual_serial_no' ? 190 : col.type === 'barcode_length' ? 160 : col.type === 'calculated_mfg_year' ? 95 : col.type === 'scrap' ? 95 : col.type === 'repairable' ? 100 : 110,
+                      background: ['actual_serial_no', 'barcode_length', 'calculated_mfg_year', 'scrap', 'repairable'].includes(col.type) ? 'rgba(var(--color-primary-rgb), 0.05)' : 'transparent',
+                      color: ['actual_serial_no', 'barcode_length', 'calculated_mfg_year', 'scrap', 'repairable'].includes(col.type) ? 'var(--color-primary)' : 'var(--text-main)',
                       fontWeight: 800,
                       textAlign: 'center'
                     }}
@@ -682,6 +684,26 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                             }}
                           >
                             {isScrap ? 'SCRAP' : '-'}
+                          </td>
+                        );
+                      }
+
+                      if (col.type === 'repairable') {
+                        const isRepairable = getCellValue(activeSheetName, rIdx, 'repairable', '') === 'true';
+                        return (
+                          <td key={cIdx} style={{ padding: '6px 12px', textAlign: 'center', minWidth: 100 }}>
+                            <input
+                              type="checkbox"
+                              checked={isRepairable}
+                              onChange={(e) => {
+                                handleCellEdit(activeSheetName, rIdx, 'repairable', e.target.checked ? 'true' : 'false');
+                              }}
+                              style={{
+                                cursor: 'pointer',
+                                transform: 'scale(1.25)',
+                                accentColor: 'var(--color-primary)'
+                              }}
+                            />
                           </td>
                         );
                       }
