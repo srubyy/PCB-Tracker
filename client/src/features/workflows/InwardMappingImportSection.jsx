@@ -446,19 +446,19 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
   for (let c = 0; c < numColumns; c++) {
     const letter = getColumnLetter(c);
     columns.push({ index: c, type: 'excel', label: letter });
-    if (c === barcodeColIdx) {
+    if (c === dummyColIdx) {
       columns.push({ index: 'actual_serial_no', type: 'actual_serial_no', label: 'Actual Serial No' });
-    }
-    if (c === mfgYearColIdx) {
+      columns.push({ index: 'barcode_length', type: 'barcode_length', label: 'Length of Actual Serial No' });
+      columns.push({ index: 'calculated_mfg_year', type: 'calculated_mfg_year', label: 'Mfg Year' });
       columns.push({ index: 'scrap', type: 'scrap', label: 'Scrap' });
     }
   }
 
-  // Fallbacks if not detected in loop
-  if (barcodeColIdx === -1 && numColumns > 0) {
+  // Fallbacks if dummyColIdx was not detected in Excel sheet
+  if (dummyColIdx === -1 && numColumns > 0) {
     columns.push({ index: 'actual_serial_no', type: 'actual_serial_no', label: 'Actual Serial No' });
-  }
-  if (mfgYearColIdx === -1 && numColumns > 0) {
+    columns.push({ index: 'barcode_length', type: 'barcode_length', label: 'Length of Actual Serial No' });
+    columns.push({ index: 'calculated_mfg_year', type: 'calculated_mfg_year', label: 'Mfg Year' });
     columns.push({ index: 'scrap', type: 'scrap', label: 'Scrap' });
   }
 
@@ -554,9 +554,9 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                     key={idx}
                     style={{
                       padding: '8px 12px',
-                      minWidth: col.type === 'actual_serial_no' ? 190 : col.type === 'scrap' ? 95 : 110,
-                      background: col.type === 'actual_serial_no' ? 'rgba(var(--color-primary-rgb), 0.05)' : 'transparent',
-                      color: col.type === 'actual_serial_no' ? 'var(--color-primary)' : 'var(--text-main)',
+                      minWidth: col.type === 'actual_serial_no' ? 190 : col.type === 'barcode_length' ? 160 : col.type === 'calculated_mfg_year' ? 95 : col.type === 'scrap' ? 95 : 110,
+                      background: ['actual_serial_no', 'barcode_length', 'calculated_mfg_year', 'scrap'].includes(col.type) ? 'rgba(var(--color-primary-rgb), 0.05)' : 'transparent',
+                      color: ['actual_serial_no', 'barcode_length', 'calculated_mfg_year', 'scrap'].includes(col.type) ? 'var(--color-primary)' : 'var(--text-main)',
                       fontWeight: 800,
                       textAlign: 'center'
                     }}
@@ -637,41 +637,36 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                         );
                       }
 
-                      if (col.type === 'scrap') {
+                      if (col.type === 'barcode_length') {
                         return (
-                          <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 800, textAlign: 'center' }}>
-                            {valInfo.status === 'scrap' ? (
-                              <span style={{ color: '#dc3545' }}>SCRAP</span>
-                            ) : (
-                              ''
-                            )}
+                          <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 700, textAlign: 'center', minWidth: 160 }}>
+                            {actualBarcode ? actualBarcode.length : 0}
                           </td>
                         );
                       }
 
-                      // Hijack cell if it represents 'Mfg Year' to show live year
-                      if (col.index === mfgYearColIdx) {
+                      if (col.type === 'calculated_mfg_year') {
                         return (
-                          <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 700, textAlign: 'center' }}>
+                          <td key={cIdx} style={{ padding: '6px 12px', fontWeight: 700, textAlign: 'center', minWidth: 95 }}>
                             {calculatedYear || ''}
                           </td>
                         );
                       }
 
-                      // Hijack cell if it represents 'Scrap' status (read-only)
-                      if (col.index === 'scrap') {
+                      if (col.type === 'scrap') {
                         const isScrap = calculatedYear && calculatedYear <= 2022;
                         return (
                           <td
                             key={cIdx}
                             style={{
                               padding: '6px 12px',
-                              fontWeight: 700,
+                              fontWeight: 800,
                               textAlign: 'center',
+                              minWidth: 95,
                               color: isScrap ? '#dc3545' : 'var(--color-primary)'
                             }}
                           >
-                            {isScrap ? 'Scrap' : '-'}
+                            {isScrap ? 'SCRAP' : '-'}
                           </td>
                         );
                       }
