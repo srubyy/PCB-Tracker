@@ -1,4 +1,5 @@
 import pool, { isFallback, query } from '../config/db.js';
+import XLSX from 'xlsx';
 import { Panel } from '../models/Panel.js';
 import { Lot } from '../models/Lot.js';
 import { PendingLog } from '../models/PendingLog.js';
@@ -943,45 +944,39 @@ export const uploadExcel = async (req, res) => {
   const fileStream = fs.createWriteStream(tempFilePath);
   req.pipe(fileStream);
 
-  fileStream.on('finish', () => {
-    const pyPath = path.join(process.cwd(), '.venv', 'bin', 'python');
-    let scriptPath = path.join(process.cwd(), 'parse_excel.py');
-    if (!fs.existsSync(scriptPath)) {
-      scriptPath = path.join(process.cwd(), 'backend', 'parse_excel.py');
-    }
-    
-    exec(`"${pyPath}" "${scriptPath}" "${tempFilePath}"`, { maxBuffer: 50 * 1024 * 1024 }, async (err, stdout, stderr) => {
+  fileStream.on('finish', async () => {
+    try {
+      const workbook = XLSX.readFile(tempFilePath);
+      const sheets = {};
+      workbook.SheetNames.forEach(sheetName => {
+        const worksheet = workbook.Sheets[sheetName];
+        // Convert to 2D array
+        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+        // Format exactly as the python parser did: all cells as strings
+        const cleanedRows = rows.map(row => 
+          row.map(val => (val !== undefined && val !== null) ? String(val).trim() : '')
+        );
+        sheets[sheetName] = cleanedRows;
+      });
+
       try { fs.unlinkSync(tempFilePath); } catch (e) {}
 
-      if (err) {
-        console.error('Python execution error:', err, stderr);
-        return res.status(500).json({ error: "Failed to parse Excel file using Pandas." });
+      fs.writeFileSync(finalJsonPath, JSON.stringify(sheets), 'utf8');
+
+      if (isFallback()) {
+        memoryDb.tables.cell_edits = memoryDb.tables.cell_edits.filter(e => e.lot_id !== lotId);
+      } else {
+        await pool.query('DELETE FROM cell_edits WHERE lot_id = $1', [lotId]);
       }
 
-      try {
-        const startIdx = stdout.indexOf('{');
-        const jsonStr = startIdx !== -1 ? stdout.substring(startIdx) : stdout;
-        const parsed = JSON.parse(jsonStr);
-        if (!parsed.success) {
-          return res.status(400).json({ error: parsed.error || "Failed parsing sheet." });
-        }
+      await syncExcelPanels(lotId, sheets);
 
-        fs.writeFileSync(finalJsonPath, JSON.stringify(parsed.sheets), 'utf8');
-
-        if (isFallback()) {
-          memoryDb.tables.cell_edits = memoryDb.tables.cell_edits.filter(e => e.lot_id !== lotId);
-        } else {
-          await pool.query('DELETE FROM cell_edits WHERE lot_id = $1', [lotId]);
-        }
-
-        await syncExcelPanels(lotId, parsed.sheets);
-
-        res.json({ success: true, message: "Imported Excel file successfully." });
-      } catch (ex) {
-        console.error('Upload handler error:', ex);
-        res.status(500).json({ error: ex.message || "Internal parsing error." });
-      }
-    });
+      res.json({ success: true, message: "Imported Excel file successfully." });
+    } catch (ex) {
+      console.error('Upload handler error:', ex);
+      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+      res.status(500).json({ error: ex.message || "Failed to parse Excel file." });
+    }
   });
 
   fileStream.on('error', (err) => {
