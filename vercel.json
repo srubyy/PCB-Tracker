@@ -19,7 +19,7 @@
     },
     {
       "src": "/api/(.*)",
-      "dest": "https://pcb-tracker-backend.herokuapp.com/api/$1"
+      "dest": "https://pcb-tracker.onrender.com/api/$1"
     },
     {
       "src": "/(.*)",
