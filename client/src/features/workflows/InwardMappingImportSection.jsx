@@ -207,8 +207,10 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
 
       const matchedIdx = rows.findIndex((row, rIdx) => {
         const rawDummy = row[dummyColIdx];
-        const dummyVal = String(getCellValue(activeSheetName, rIdx, dummyColIdx, rawDummy) || '').toLowerCase();
-        return dummyVal === scannedVal.toLowerCase();
+        const dummyVal = String(getCellValue(activeSheetName, rIdx, dummyColIdx, rawDummy) || '').toLowerCase().trim();
+        const target = scannedVal.toLowerCase().trim();
+        return dummyVal === target || 
+               (dummyVal.replace(/\D/g, '') === target.replace(/\D/g, '') && dummyVal.replace(/\D/g, '').length > 0);
       });
 
       if (matchedIdx !== -1) {
@@ -436,6 +438,16 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     
     return (
       <div className="glass-panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
+        <style>{`
+          .excel-table td.editable-cell {
+            position: relative;
+            transition: all 0.15s ease-on;
+          }
+          .excel-table td.editable-cell:hover {
+            background: rgba(var(--color-primary-rgb), 0.1) !important;
+            outline: 1px dashed var(--color-primary) !important;
+          }
+        `}</style>
         
         {/* Header toolbar */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
@@ -488,7 +500,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
 
         {/* Scrollable table grid */}
         <div style={{ overflowX: 'auto', border: '1px solid var(--card-border)', borderRadius: 8, maxHeight: 500, overflowY: 'auto' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
+          <table className="excel-table" style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
             <thead>
               <tr style={{ background: 'rgba(255,255,255,0.03)', borderBottom: '1px solid var(--card-border)' }}>
                 <th style={{ padding: '8px 12px', width: 50, position: 'sticky', left: 0, background: 'var(--card-bg)', zIndex: 10 }}>#</th>
@@ -597,6 +609,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                       return (
                         <td
                           key={cIdx}
+                          className="editable-cell"
                           style={{
                             padding: '4px 6px',
                             cursor: 'pointer',
