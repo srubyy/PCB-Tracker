@@ -18,7 +18,18 @@ const extractMfgYear = (serial) => {
     return null;
   }
 
-  // 1. Atomberg format: extract characters at index 2 and 3 (0-based)
+  // Try regex matching: any letter followed by exactly 2 digits (e.g. B22, E26, D21)
+  const matches = s.match(/[a-zA-Z](\d{2})/g);
+  if (matches) {
+    for (const m of matches) {
+      const yr = parseInt(m.substring(1), 10);
+      if (yr >= 10 && yr <= 50) {
+        return 2000 + yr;
+      }
+    }
+  }
+
+  // 1. Fallback: Atomberg format: extract characters at index 2 and 3 (0-based)
   if (len >= 4) {
     const yrPart = s.substring(2, 4);
     const yr = parseInt(yrPart, 10);
