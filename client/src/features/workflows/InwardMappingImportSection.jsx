@@ -213,7 +213,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
               const rIdx = parseInt(parts[parts.length - 1], 10);
               if (!isNaN(rIdx)) {
                 setCellEdits(prev => prev.filter(item => 
-                  !(item.sheet_name === activeSheetName && item.row_idx === rIdx && String(item.col_idx) === 'actual_serial_no')
+                  !(item.sheet_name === activeSheetName && String(item.row_idx) === String(rIdx) && String(item.col_idx) === 'actual_serial_no')
                 ));
               }
             }
@@ -342,7 +342,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
   const getCellValue = (sheetName, rowIdx, colIdx, rawVal) => {
     const edit = cellEdits.find(e => 
       e.sheet_name === sheetName && 
-      e.row_idx === rowIdx && 
+      String(e.row_idx) === String(rowIdx) && 
       String(e.col_idx) === String(colIdx)
     );
     return edit ? edit.value : (rawVal !== undefined ? String(rawVal) : '');
@@ -355,7 +355,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     // Optimistic Update
     setCellEdits(prev => {
       const filtered = prev.filter(e => 
-        !(e.sheet_name === sheetName && e.row_idx === rowIdx && String(e.col_idx) === String(colIdx))
+        !(e.sheet_name === sheetName && String(e.row_idx) === String(rowIdx) && String(e.col_idx) === String(colIdx))
       );
       return [...filtered, { sheet_name: sheetName, row_idx: rowIdx, col_idx: String(colIdx), value }];
     });
@@ -386,7 +386,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     // Optimistic Update
     setCellEdits(prev => {
       const filtered = prev.filter(e => 
-        !(e.sheet_name === sheetName && e.row_idx === rowIdx && String(e.col_idx) === 'actual_serial_no')
+        !(e.sheet_name === sheetName && String(e.row_idx) === String(rowIdx) && String(e.col_idx) === 'actual_serial_no')
       );
       return [...filtered, { sheet_name: sheetName, row_idx: rowIdx, col_idx: 'actual_serial_no', value: cleanVal }];
     });
@@ -685,7 +685,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                                   if (val.length > 0 && val.length < 12) {
                                     // Discard invalid value silently
                                     setCellEdits(prev => prev.filter(item => 
-                                      !(item.sheet_name === activeSheetName && item.row_idx === rIdx && String(item.col_idx) === 'actual_serial_no')
+                                      !(item.sheet_name === activeSheetName && String(item.row_idx) === String(rIdx) && String(item.col_idx) === 'actual_serial_no')
                                     ));
                                   }
                                 }}
