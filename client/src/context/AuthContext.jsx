@@ -3,6 +3,18 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 const AuthContext = createContext(null);
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
 
+const safeJson = async (res) => {
+  const contentType = res.headers.get('content-type');
+  if (!contentType || !contentType.includes('application/json')) {
+    throw new Error('Server returned a non-JSON response. Please ensure your backend is deployed and VITE_API_BASE_URL is configured in your Vercel settings.');
+  }
+  try {
+    return await res.json();
+  } catch (err) {
+    throw new Error('Failed to parse server response.');
+  }
+};
+
 export const AuthProvider = ({ children }) => {
   const [user, setUser] = useState(null);
   const [accessToken, setAccessToken] = useState(null);
@@ -28,7 +40,7 @@ export const AuthProvider = ({ children }) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
       });
-      const data = await res.json();
+      const data = await safeJson(res);
       
       if (!res.ok) {
         throw new Error(data.error || 'Login failed.');
@@ -114,7 +126,7 @@ export const AuthProvider = ({ children }) => {
           body: JSON.stringify({ refreshToken: storedRefreshToken })
         });
         
-        const refreshData = await refreshRes.json();
+        const refreshData = await safeJson(refreshRes);
         
         if (refreshRes.ok && refreshData.accessToken) {
           console.log('Token refresh succeeded. Rotated access token received.');
