@@ -1,5 +1,6 @@
 import pool, { isFallback, query } from '../config/db.js';
 import XLSX from 'xlsx';
+import ExcelJS from 'exceljs';
 import { Panel } from '../models/Panel.js';
 import { Lot } from '../models/Lot.js';
 import { PendingLog } from '../models/PendingLog.js';
@@ -1573,46 +1574,270 @@ export const exportExcel = async (req, res) => {
     };
     exportHistory.push(currentExportFormatted);
 
-    // 9. Run python exporter script
-    const pyInputPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_export_payload.json`);
+    // 9. Run ExcelJS native export
     const pyOutputPath = path.join(process.cwd(), 'uploads', filename);
 
-    const pyInput = {
-      dest_file_path: pyOutputPath,
-      raw_sheets: processedSheets,
-      cell_edits: cellEdits,
-      scan_logs: scanLogs,
-      export_history: exportHistory,
-      scrap_year_threshold: lot ? lot.scrap_year_threshold : null,
-      separate_year_threshold: lot ? lot.separate_year_threshold : null,
-      checkbox_year_threshold: lot ? lot.checkbox_year_threshold : null
-    };
+    const workbook = new ExcelJS.Workbook();
 
-    fs.writeFileSync(pyInputPath, JSON.stringify(pyInput, null, 2), 'utf8');
+    const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+    const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+    const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
 
-    const pyPath = path.join(process.cwd(), '.venv', 'bin', 'python');
-    let scriptPath = path.join(process.cwd(), 'export_excel.py');
-    if (!fs.existsSync(scriptPath)) {
-      scriptPath = path.join(process.cwd(), 'backend', 'export_excel.py');
-    }
+    for (const sheetName of Object.keys(processedSheets)) {
+      const rows = processedSheets[sheetName] || [];
+      if (rows.length === 0) continue;
 
-    exec(`"${pyPath}" "${scriptPath}" "${pyInputPath}"`, { maxBuffer: 50 * 1024 * 1024 }, (pyErr, pyStdout, pyStderr) => {
-      try { fs.unlinkSync(pyInputPath); } catch (e) {}
+      const worksheet = workbook.addWorksheet(sheetName);
 
-      if (pyErr) {
-        console.error("Python export script error:", pyErr, pyStderr);
-        return res.status(500).json({ error: "Failed to generate Excel file." });
+      const header = (rows[0] || []).map(h => String(h || '').toLowerCase().trim());
+      let dummyColIdx = -1;
+      let barcodeColIdx = -1;
+      for (let i = 0; i < header.length; i++) {
+        const val = header[i];
+        if (val.includes('pcb sr no') || val.includes('pcb serial') || val.includes('dummy') || val.includes('sr no') || val.includes('sr_no')) {
+          if (dummyColIdx === -1) dummyColIdx = i;
+        }
+        if (val.includes('barcode') || val.includes('actual serial') || val.includes('real serial')) {
+          if (barcodeColIdx === -1) barcodeColIdx = i;
+        }
       }
 
-      // Stream the generated file to client and delete after completion
-      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-      res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-      res.sendFile(pyOutputPath, (sendErr) => {
-        try { fs.unlinkSync(pyOutputPath); } catch (e) {}
-        if (sendErr) {
-          console.error("File download streaming error:", sendErr);
+      const insertPos = dummyColIdx !== -1 ? dummyColIdx + 1 : 1;
+      const sheetEdits = cellEdits.filter(e => e.sheet_name === sheetName);
+
+      const originalHeader = [...rows[0]];
+      sheetEdits.forEach(edit => {
+        if (Number(edit.row_idx) === 0) {
+          const cIdx = Number(edit.col_idx);
+          if (!isNaN(cIdx) && cIdx >= 0 && cIdx < originalHeader.length) {
+            originalHeader[cIdx] = edit.value;
+          }
         }
       });
+
+      const virtualHeaders = ["Actual Serial No", "Length of Actual Serial No", "Mfg Year", "Action"];
+      const finalHeader = [...originalHeader];
+      virtualHeaders.forEach((vH, index) => {
+        finalHeader.splice(insertPos + index, 0, vH);
+      });
+
+      const headerRow = worksheet.addRow(finalHeader);
+      headerRow.height = 25;
+
+      for (let rIdx = 1; rIdx < rows.length; rIdx++) {
+        const originalRow = [...rows[rIdx]];
+
+        sheetEdits.forEach(edit => {
+          if (Number(edit.row_idx) === rIdx) {
+            const cIdx = Number(edit.col_idx);
+            if (!isNaN(cIdx) && cIdx >= 0 && cIdx < originalRow.length) {
+              originalRow[cIdx] = edit.value;
+            }
+          }
+        });
+
+        let actualBarcode = '';
+        const barcodeEdit = sheetEdits.find(e => Number(e.row_idx) === rIdx && String(e.col_idx) === 'actual_serial_no');
+        if (barcodeEdit) {
+          actualBarcode = barcodeEdit.value;
+        } else if (barcodeColIdx !== -1 && barcodeColIdx < originalRow.length) {
+          actualBarcode = originalRow[barcodeColIdx];
+        }
+
+        actualBarcode = String(actualBarcode || '').trim();
+        if (actualBarcode === '-') actualBarcode = '';
+
+        const barcodeLength = actualBarcode ? actualBarcode.length : 0;
+        const calculatedYear = extractMfgYear(actualBarcode);
+
+        let repairableVal = 'No';
+        const repairableEdit = sheetEdits.find(e => Number(e.row_idx) === rIdx && String(e.col_idx) === 'repairable');
+        if (repairableEdit) {
+          repairableVal = repairableEdit.value === 'true' ? 'Yes' : 'No';
+        }
+
+        let actionVal = !actualBarcode ? 'Pending' : '-';
+        if (calculatedYear) {
+          if (calculatedYear <= scrapYear) {
+            actionVal = 'Scrap';
+          } else if (lot.separate_year_threshold !== null && calculatedYear === sepYear) {
+            actionVal = 'Separate';
+          } else if (calculatedYear >= chkYear) {
+            actionVal = (repairableVal === 'Yes') ? 'Repairable' : 'Non-Repairable';
+          }
+        }
+
+        const yearDisplay = calculatedYear ? String(calculatedYear) : '';
+
+        const finalRowData = [...originalRow];
+        const virtualValues = [actualBarcode, barcodeLength, yearDisplay, actionVal];
+        virtualValues.forEach((val, index) => {
+          finalRowData.splice(insertPos + index, 0, val);
+        });
+
+        const dataRow = worksheet.addRow(finalRowData);
+        dataRow.height = 20;
+      }
+
+      worksheet.views = [{ showGridLines: true }];
+
+      const headerFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF1F4E78' }
+      };
+      const headerFont = {
+        name: 'Arial',
+        size: 10,
+        bold: true,
+        color: { argb: 'FFFFFFFF' }
+      };
+
+      const virtualFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFD9E1F2' }
+      };
+      const virtualFont = {
+        name: 'Arial',
+        size: 10,
+        bold: true,
+        color: { argb: 'FF1F4E78' }
+      };
+
+      const normalFont = {
+        name: 'Arial',
+        size: 10
+      };
+
+      const borderStyle = {
+        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
+      };
+
+      for (let colIdx = 1; colIdx <= finalHeader.length; colIdx++) {
+        const cell = worksheet.getCell(1, colIdx);
+        const cellVal = String(cell.value || '');
+        if (virtualHeaders.includes(cellVal)) {
+          cell.fill = virtualFill;
+          cell.font = virtualFont;
+        } else {
+          cell.fill = headerFill;
+          cell.font = headerFont;
+        }
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = borderStyle;
+      }
+
+      for (let r = 2; r <= worksheet.rowCount; r++) {
+        for (let colIdx = 1; colIdx <= finalHeader.length; colIdx++) {
+          const cell = worksheet.getCell(r, colIdx);
+          cell.font = normalFont;
+          cell.border = borderStyle;
+
+          const cellVal = String(cell.value || '');
+          if (/^\d+$/.test(cellVal)) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.value = Number(cellVal);
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        }
+      }
+
+      worksheet.columns.forEach(column => {
+        let maxLen = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const val = String(cell.value || '');
+          if (val) maxLen = Math.max(maxLen, val.length);
+        });
+        column.width = Math.max(maxLen + 4, 12);
+      });
+    }
+
+    if (exportHistory && exportHistory.length > 0) {
+      const historySheet = workbook.addWorksheet("Export History");
+      historySheet.views = [{ showGridLines: true }];
+
+      const historyHeaders = ["Export Number", "Timestamp", "PCBs Scanned", "Who Exported"];
+      const headerRow = historySheet.addRow(historyHeaders);
+      headerRow.height = 25;
+
+      const headerFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FF1F4E78' }
+      };
+      const headerFont = {
+        name: 'Arial',
+        size: 10,
+        bold: true,
+        color: { argb: 'FFFFFFFF' }
+      };
+      const normalFont = {
+        name: 'Arial',
+        size: 10
+      };
+      const borderStyle = {
+        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
+      };
+
+      for (let colIdx = 1; colIdx <= historyHeaders.length; colIdx++) {
+        const cell = historySheet.getCell(1, colIdx);
+        cell.fill = headerFill;
+        cell.font = headerFont;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = borderStyle;
+      }
+
+      exportHistory.forEach(hist => {
+        const rowData = [
+          hist.export_number,
+          hist.timestamp,
+          hist.scanned_count,
+          hist.exported_by || 'Unknown'
+        ];
+        const dataRow = historySheet.addRow(rowData);
+        dataRow.height = 20;
+
+        for (let colIdx = 1; colIdx <= historyHeaders.length; colIdx++) {
+          const cell = historySheet.getCell(dataRow.number, colIdx);
+          cell.font = normalFont;
+          cell.border = borderStyle;
+          const cellVal = String(cell.value || '');
+          if (/^\d+$/.test(cellVal)) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.value = Number(cellVal);
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        }
+      });
+
+      historySheet.columns.forEach(column => {
+        let maxLen = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const val = String(cell.value || '');
+          if (val) maxLen = Math.max(maxLen, val.length);
+        });
+        column.width = Math.max(maxLen + 4, 12);
+      });
+    }
+
+    await workbook.xlsx.writeFile(pyOutputPath);
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.sendFile(pyOutputPath, (sendErr) => {
+      try { fs.unlinkSync(pyOutputPath); } catch (e) {}
+      if (sendErr) {
+        console.error("File download streaming error:", sendErr);
+      }
     });
 
   } catch (err) {
