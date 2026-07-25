@@ -196,13 +196,14 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
           
           const isDummy = scannedVal.length < 12;
           if (isDummy) {
-            // Restore previous input value to unpollute it
+            // Clear the polluted state for this row in cellEdits directly
             if (preScanInputId) {
-              const inputEl = document.getElementById(preScanInputId);
-              if (inputEl) {
-                inputEl.value = preScanValue;
-                const event = new Event('input', { bubbles: true });
-                inputEl.dispatchEvent(event);
+              const parts = preScanInputId.split('-');
+              const rIdx = parseInt(parts[parts.length - 1], 10);
+              if (!isNaN(rIdx)) {
+                setCellEdits(prev => prev.filter(item => 
+                  !(item.sheet_name === activeSheetName && item.row_idx === rIdx && String(item.col_idx) === 'actual_serial_no')
+                ));
               }
             }
             handleGlobalScan(scannedVal);
@@ -610,6 +611,16 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                                 onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     e.target.blur();
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const val = e.target.value.trim();
+                                  if (val.length > 0 && val.length < 12) {
+                                    // Discard invalid value
+                                    setCellEdits(prev => prev.filter(item => 
+                                      !(item.sheet_name === activeSheetName && item.row_idx === rIdx && String(item.col_idx) === 'actual_serial_no')
+                                    ));
+                                    setRowErrors(prev => ({ ...prev, [rIdx]: 'Barcode must be at least 12 characters' }));
                                   }
                                 }}
                                 style={{
