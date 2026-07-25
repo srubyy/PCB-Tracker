@@ -194,7 +194,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
           const scannedVal = scanBuffer.trim();
           scanBuffer = '';
           
-          const isDummy = scannedVal.length === 8 || scannedVal.toLowerCase().startsWith('at');
+          const isDummy = scannedVal.length < 12;
           if (isDummy) {
             // Restore previous input value to unpollute it
             if (preScanInputId) {
@@ -229,7 +229,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
 
   // Locate, highlight and focus row matching scanned dummy barcode
   const handleGlobalScan = (scannedVal) => {
-    const isDummy = scannedVal.length === 8 || scannedVal.startsWith('AT');
+    const isDummy = scannedVal.length < 12;
     
     if (isDummy) {
       const rows = excelSheets[activeSheetName] || [];
@@ -393,9 +393,9 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     }
 
     try {
-      // Validate barcode length (at least 8 characters)
-      if (cleanVal.length < 8) {
-        setRowErrors(prev => ({ ...prev, [rowIdx]: 'Barcode must be at least 8 characters' }));
+      // Validate barcode length (at least 12 characters)
+      if (cleanVal.length < 12) {
+        setRowErrors(prev => ({ ...prev, [rowIdx]: 'Barcode must be at least 12 characters' }));
         return;
       }
 
