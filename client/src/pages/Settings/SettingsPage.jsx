@@ -23,11 +23,23 @@ const DEFAULT_12_STEPS = [
 const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
   const { user, apiFetch } = useAuth();
   
-  const [activeTab, setActiveTab] = useState(() => localStorage.getItem('es_settings_active_tab') || 'users');
+  const [activeTab, setActiveTab] = useState('users');
 
+  // Load user-specific states when user loads
   useEffect(() => {
-    localStorage.setItem('es_settings_active_tab', activeTab);
-  }, [activeTab]);
+    if (user) {
+      setActiveTab(localStorage.getItem(`es_settings_active_tab_${user.email}`) || 'users');
+    } else {
+      setActiveTab('users');
+    }
+  }, [user]);
+
+  // Sync changes to user-specific localStorage keys
+  useEffect(() => {
+    if (user && activeTab) {
+      localStorage.setItem(`es_settings_active_tab_${user.email}`, activeTab);
+    }
+  }, [activeTab, user]);
   
   // Tab 1: System Users Directory
   const [adminUsers, setAdminUsers] = useState([]);

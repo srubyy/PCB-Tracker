@@ -13,11 +13,8 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   const [stockData, setStockData] = useState([]);
 
   // Terminal selection states
-  const [selectedProductionStep, setSelectedProductionStep] = useState(() => {
-    const saved = localStorage.getItem('es_workflow_step');
-    return saved ? parseInt(saved, 10) : 1;
-  });
-  const [productionLotId, setProductionLotId] = useState(() => localStorage.getItem('es_workflow_lot_id') || '');
+  const [selectedProductionStep, setSelectedProductionStep] = useState(1);
+  const [productionLotId, setProductionLotId] = useState('');
   const [productionPcbType, setProductionPcbType] = useState('GV3 Digital PCB');
   const [stepInputs, setStepInputs] = useState({});
   const [pendingProductionLogs, setPendingProductionLogs] = useState([]);
@@ -25,19 +22,41 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   const [lotProductionStats, setLotProductionStats] = useState(null);
   const [rejectionLogInputId, setRejectionLogInputId] = useState(null);
   const [rejectionLogText, setRejectionLogText] = useState('');
-  const [inwardTab, setInwardTab] = useState(() => localStorage.getItem('es_workflow_inward_tab') || 'summary');
+  const [inwardTab, setInwardTab] = useState('summary');
+
+  // Load user-specific states when user loads
+  useEffect(() => {
+    if (user) {
+      const email = user.email;
+      const savedStep = localStorage.getItem(`es_workflow_step_${email}`);
+      setSelectedProductionStep(savedStep ? parseInt(savedStep, 10) : 1);
+      setProductionLotId(localStorage.getItem(`es_workflow_lot_id_${email}`) || '');
+      setInwardTab(localStorage.getItem(`es_workflow_inward_tab_${email}`) || 'summary');
+    } else {
+      setSelectedProductionStep(1);
+      setProductionLotId('');
+      setInwardTab('summary');
+    }
+  }, [user]);
+
+  // Sync changes to user-specific localStorage keys
+  useEffect(() => {
+    if (user && selectedProductionStep) {
+      localStorage.setItem(`es_workflow_step_${user.email}`, selectedProductionStep);
+    }
+  }, [selectedProductionStep, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_workflow_step', selectedProductionStep);
-  }, [selectedProductionStep]);
+    if (user) {
+      localStorage.setItem(`es_workflow_lot_id_${user.email}`, productionLotId);
+    }
+  }, [productionLotId, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_workflow_lot_id', productionLotId);
-  }, [productionLotId]);
-
-  useEffect(() => {
-    localStorage.setItem('es_workflow_inward_tab', inwardTab);
-  }, [inwardTab]);
+    if (user && inwardTab) {
+      localStorage.setItem(`es_workflow_inward_tab_${user.email}`, inwardTab);
+    }
+  }, [inwardTab, user]);
 
 
   const [steps, setSteps] = useState([

@@ -1,39 +1,68 @@
 import React, { useState, useEffect } from 'react';
 import { FileSpreadsheet, Building, Layers, ShieldCheck, CheckCircle2, ArrowRight, ArrowLeft, Upload, Grid } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 const LotSetupWizard = ({ showToast, apiFetch, onRefreshLots }) => {
-  const [step, setStep] = useState(() => {
-    const saved = localStorage.getItem('es_wizard_step');
-    return saved ? parseInt(saved, 10) : 1;
-  });
+  const { user } = useAuth();
+  const [step, setStep] = useState(1);
   const [companies, setCompanies] = useState([]);
   const [lots, setLots] = useState([]);
   
   // Selections
-  const [selectedCompanyId, setSelectedCompanyId] = useState(() => localStorage.getItem('es_wizard_company_id') || '');
-  const [selectedCompanyName, setSelectedCompanyName] = useState(() => localStorage.getItem('es_wizard_company_name') || '');
-  const [selectedLotId, setSelectedLotId] = useState(() => localStorage.getItem('es_wizard_lot_id') || '');
-  const [selectedLotNo, setSelectedLotNo] = useState(() => localStorage.getItem('es_wizard_lot_no') || '');
+  const [selectedCompanyId, setSelectedCompanyId] = useState('');
+  const [selectedCompanyName, setSelectedCompanyName] = useState('');
+  const [selectedLotId, setSelectedLotId] = useState('');
+  const [selectedLotNo, setSelectedLotNo] = useState('');
+
+  // Load user-specific states when user loads
+  useEffect(() => {
+    if (user) {
+      const email = user.email;
+      const savedStep = localStorage.getItem(`es_wizard_step_${email}`);
+      setStep(savedStep ? parseInt(savedStep, 10) : 1);
+      setSelectedCompanyId(localStorage.getItem(`es_wizard_company_id_${email}`) || '');
+      setSelectedCompanyName(localStorage.getItem(`es_wizard_company_name_${email}`) || '');
+      setSelectedLotId(localStorage.getItem(`es_wizard_lot_id_${email}`) || '');
+      setSelectedLotNo(localStorage.getItem(`es_wizard_lot_no_${email}`) || '');
+    } else {
+      setStep(1);
+      setSelectedCompanyId('');
+      setSelectedCompanyName('');
+      setSelectedLotId('');
+      setSelectedLotNo('');
+    }
+  }, [user]);
+
+  // Sync changes to user-specific localStorage keys
+  useEffect(() => {
+    if (user && step) {
+      localStorage.setItem(`es_wizard_step_${user.email}`, step);
+    }
+  }, [step, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_wizard_step', step);
-  }, [step]);
+    if (user) {
+      localStorage.setItem(`es_wizard_company_id_${user.email}`, selectedCompanyId);
+    }
+  }, [selectedCompanyId, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_wizard_company_id', selectedCompanyId);
-  }, [selectedCompanyId]);
+    if (user) {
+      localStorage.setItem(`es_wizard_company_name_${user.email}`, selectedCompanyName);
+    }
+  }, [selectedCompanyName, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_wizard_company_name', selectedCompanyName);
-  }, [selectedCompanyName]);
+    if (user) {
+      localStorage.setItem(`es_wizard_lot_id_${user.email}`, selectedLotId);
+    }
+  }, [selectedLotId, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_wizard_lot_id', selectedLotId);
-  }, [selectedLotId]);
-
-  useEffect(() => {
-    localStorage.setItem('es_wizard_lot_no', selectedLotNo);
-  }, [selectedLotNo]);
+    if (user) {
+      localStorage.setItem(`es_wizard_lot_no_${user.email}`, selectedLotNo);
+    }
+  }, [selectedLotNo, user]);
   
   // Step 1: New Company Form
   const [showNewCompanyForm, setShowNewCompanyForm] = useState(false);

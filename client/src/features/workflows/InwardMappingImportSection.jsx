@@ -7,14 +7,24 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
   // Spreadsheet States
   const [excelSheets, setExcelSheets] = useState({}); // { sheetName: [[cell, cell, ...], ...] }
   const [cellEdits, setCellEdits] = useState([]); // Array of edits: { sheet_name, row_idx, col_idx, value }
-  const [activeSheetName, setActiveSheetName] = useState(() => localStorage.getItem('es_inward_active_sheet') || '');
+  const [activeSheetName, setActiveSheetName] = useState('');
   const [visibleRowsCount, setVisibleRowsCount] = useState(500);
 
+  // Load user-specific states when user loads
   useEffect(() => {
-    if (activeSheetName) {
-      localStorage.setItem('es_inward_active_sheet', activeSheetName);
+    if (user) {
+      setActiveSheetName(localStorage.getItem(`es_inward_active_sheet_${user.email}`) || '');
+    } else {
+      setActiveSheetName('');
     }
-  }, [activeSheetName]);
+  }, [user]);
+
+  // Sync changes to user-specific localStorage keys
+  useEffect(() => {
+    if (user && activeSheetName) {
+      localStorage.setItem(`es_inward_active_sheet_${user.email}`, activeSheetName);
+    }
+  }, [activeSheetName, user]);
   const [lotRules, setLotRules] = useState(null);
 
   const [loading, setLoading] = useState(false);

@@ -17,26 +17,47 @@ import LotSetupWizard from './pages/LotSetup/LotSetupWizard';
 
 function App() {
   const { user, loading, apiFetch } = useAuth();
-  const [view, setView] = useState(() => localStorage.getItem('es_app_view') || 'dashboard');
+  const [view, setView] = useState('dashboard');
   const [searchLotNo, setSearchLotNo] = useState('');
   const [searchSrNo, setSearchSrNo] = useState('');
   const [lots, setLots] = useState([]);
-  const [globalLotNo, setGlobalLotNo] = useState(() => localStorage.getItem('es_app_global_lot_no') || '');
-  const [selectedCompany, setSelectedCompany] = useState(() => localStorage.getItem('es_app_selected_company') || '');
+  const [globalLotNo, setGlobalLotNo] = useState('');
+  const [selectedCompany, setSelectedCompany] = useState('');
   const [notification, setNotification] = useState(null);
   const [companies, setCompanies] = useState([]);
 
+  // Sync state FROM localStorage whenever the user changes/loads
   useEffect(() => {
-    localStorage.setItem('es_app_view', view);
-  }, [view]);
+    if (user) {
+      const email = user.email;
+      setView(localStorage.getItem(`es_app_view_${email}`) || 'dashboard');
+      setGlobalLotNo(localStorage.getItem(`es_app_global_lot_no_${email}`) || '');
+      setSelectedCompany(localStorage.getItem(`es_app_selected_company_${email}`) || '');
+    } else {
+      setView('dashboard');
+      setGlobalLotNo('');
+      setSelectedCompany('');
+    }
+  }, [user]);
+
+  // Sync state TO localStorage whenever it changes
+  useEffect(() => {
+    if (user && view) {
+      localStorage.setItem(`es_app_view_${user.email}`, view);
+    }
+  }, [view, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_app_global_lot_no', globalLotNo);
-  }, [globalLotNo]);
+    if (user) {
+      localStorage.setItem(`es_app_global_lot_no_${user.email}`, globalLotNo);
+    }
+  }, [globalLotNo, user]);
 
   useEffect(() => {
-    localStorage.setItem('es_app_selected_company', selectedCompany);
-  }, [selectedCompany]);
+    if (user) {
+      localStorage.setItem(`es_app_selected_company_${user.email}`, selectedCompany);
+    }
+  }, [selectedCompany, user]);
 
   const fetchLotsList = async () => {
     try {
