@@ -194,11 +194,15 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         // Auto-select first sheet as active tab or restore saved sheet
         const sheetNames = Object.keys(data.sheets || {});
         if (sheetNames.length > 0) {
-          const savedSheet = localStorage.getItem('es_inward_active_sheet');
-          if (savedSheet && sheetNames.includes(savedSheet)) {
-            setActiveSheetName(savedSheet);
+          if (activeSheetName && sheetNames.includes(activeSheetName)) {
+            // Keep current view
           } else {
-            setActiveSheetName(sheetNames[0]);
+            const savedSheet = user ? localStorage.getItem(`es_inward_active_sheet_${user.email}`) : null;
+            if (savedSheet && sheetNames.includes(savedSheet)) {
+              setActiveSheetName(savedSheet);
+            } else {
+              setActiveSheetName(sheetNames[0]);
+            }
           }
         }
       } else {
