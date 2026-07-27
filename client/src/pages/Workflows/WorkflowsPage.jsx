@@ -216,6 +216,77 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     return matchedKey ? lotProductionStats.part_code_counts[matchedKey] : 0;
   };
 
+  const getLimitForStepAndPcbType = (stepNo) => {
+    if (!lotProductionStats) return 0;
+    const partCodePrefix = productionPcbType.split(' - ')[0].trim().toLowerCase();
+
+    if (stepNo >= 2 && stepNo <= 6) {
+      if (!lotProductionStats.part_code_counts || Object.keys(lotProductionStats.part_code_counts).length === 0) {
+        return lotProductionStats.received_qty;
+      }
+      const matchedKey = Object.keys(lotProductionStats.part_code_counts).find(
+        key => key.trim().toLowerCase() === partCodePrefix
+      );
+      return matchedKey ? lotProductionStats.part_code_counts[matchedKey] : 0;
+    } else if (stepNo >= 7 && stepNo <= 10) {
+      if (!lotProductionStats.step6_part_code_counts) return 0;
+      const matchedKey = Object.keys(lotProductionStats.step6_part_code_counts).find(
+        key => key.trim().toLowerCase() === partCodePrefix
+      );
+      return matchedKey ? lotProductionStats.step6_part_code_counts[matchedKey] : 0;
+    }
+    return 0;
+  };
+
+  const getExistingLoggedQtyForSelectedPcbType = (stepNo) => {
+    if (!lotProductionStats || !lotProductionStats.pcb_type_stats) return 0;
+    const key = `${stepNo}_${productionPcbType}`;
+    const stats = lotProductionStats.pcb_type_stats[key];
+    if (!stats) return 0;
+
+    if (stepNo === 2) return (stats.repairable_qty || 0) + (stats.scrap_qty || 0);
+    if (stepNo === 3) return (stats.code_ok || 0) + (stats.code_not_ok || 0);
+    if (stepNo === 4) return (stats.qty_passed || 0) + (stats.qty_failed || 0);
+    if (stepNo === 5) return (stats.debug_ok || 0) + (stats.critical_qty || 0) + (stats.scrap_qty || 0);
+    if (stepNo === 6) return (stats.entry_count || 0);
+    if (stepNo === 7) return (stats.qty_cleaned || 0) + (stats.qc_reject || 0);
+    if (stepNo === 8) return (stats.qty_passed || 0) + (stats.qty_failed || 0);
+    if (stepNo === 9) return (stats.qty_coated || 0);
+    if (stepNo === 10) return (stats.qty_passed || 0) + (stats.qty_failed || 0);
+    return 0;
+  };
+
+  const PcbTypeWarning = ({ stepNo, inputs }) => {
+    if (!lotProductionStats || !productionPcbType) return null;
+
+    let inputSum = 0;
+    if (stepNo === 2) inputSum = (parseInt(inputs.repairable_qty || 0) + parseInt(inputs.scrap_qty || 0));
+    else if (stepNo === 3) inputSum = (parseInt(inputs.code_ok || 0) + parseInt(inputs.code_not_ok || 0));
+    else if (stepNo === 4) inputSum = (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+    else if (stepNo === 5) inputSum = (parseInt(inputs.debug_ok || 0) + parseInt(inputs.critical_qty || 0) + parseInt(inputs.scrap_qty || 0));
+    else if (stepNo === 6) inputSum = parseInt(inputs.entry_count || 0);
+    else if (stepNo === 7) inputSum = (parseInt(inputs.qty_cleaned || 0) + parseInt(inputs.qc_reject || 0));
+    else if (stepNo === 8) inputSum = (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+    else if (stepNo === 9) inputSum = parseInt(inputs.qty_coated || 0);
+    else if (stepNo === 10) inputSum = (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+
+    const limit = getLimitForStepAndPcbType(stepNo);
+    const existing = getExistingLoggedQtyForSelectedPcbType(stepNo);
+    const total = existing + inputSum;
+
+    if (total > limit) {
+      const partCodePrefix = productionPcbType.split(' - ')[0].trim();
+      const limitLabel = (stepNo >= 2 && stepNo <= 6) ? 'inward' : 'Step 6 audited';
+      return (
+        <div style={{ color: '#ef4444', fontSize: '0.72rem', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <span>⚠️ Warning: Cumulative total ({total}) would exceed the {limitLabel} limit for {partCodePrefix} ({limit})!</span>
+          <span style={{ opacity: 0.8 }}>(Already logged: {existing}, entering now: {inputSum})</span>
+        </div>
+      );
+    }
+    return null;
+  };
+
   const fetchCheckpointResults = async (lotId = productionLotId) => {
     if (!lotId) {
       setStep6Results(null);
@@ -802,19 +873,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                       Total Inspected (Repairable + Scrap): <strong>{(parseInt(stepInputs.repairable_qty || 0) + parseInt(stepInputs.scrap_qty || 0))} PCBs</strong>.
-                      {(() => {
-                        const expectedQty = getExpectedQtyForSelectedPcbType();
-                        const sum = parseInt(stepInputs.repairable_qty || 0) + parseInt(stepInputs.scrap_qty || 0);
-                        if (lotProductionStats && sum !== expectedQty) {
-                          const partCodePrefix = productionPcbType.split(' - ')[0].trim();
-                          return (
-                            <span style={{ color: '#ef4444', display: 'block', marginTop: 4 }}>
-                              ⚠️ Warning: Total must equal lot received count for {partCodePrefix} ({expectedQty})!
-                            </span>
-                          );
-                        }
-                        return null;
-                      })()}
+                      <PcbTypeWarning stepNo={2} inputs={stepInputs} />
                     </div>
                     <PresetRemarksSelect stepNo={2} stepInputs={stepInputs} setStepInputs={setStepInputs} />
                   </div>
@@ -844,6 +903,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                       Total programmed: <strong>{(parseInt(stepInputs.code_ok || 0) + parseInt(stepInputs.code_not_ok || 0))} PCBs</strong>.
+                      <PcbTypeWarning stepNo={3} inputs={stepInputs} />
                     </div>
                   </div>
                 )}
@@ -871,6 +931,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                       />
                     </div>
                     <PresetRemarksSelect stepNo={4} stepInputs={stepInputs} setStepInputs={setStepInputs} />
+                    <PcbTypeWarning stepNo={4} inputs={stepInputs} />
                   </div>
                 )}
 
@@ -907,6 +968,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                       />
                     </div>
                     <PresetRemarksSelect stepNo={5} stepInputs={stepInputs} setStepInputs={setStepInputs} />
+                    <PcbTypeWarning stepNo={5} inputs={stepInputs} />
                   </div>
                 )}
 
@@ -932,6 +994,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                         <option value="Faulty">Faulty</option>
                       </select>
                     </div>
+                    <PcbTypeWarning stepNo={6} inputs={stepInputs} />
                   </div>
                 )}
 
@@ -958,6 +1021,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                       />
                     </div>
                     <PresetRemarksSelect stepNo={7} stepInputs={stepInputs} setStepInputs={setStepInputs} />
+                    <PcbTypeWarning stepNo={7} inputs={stepInputs} />
                   </div>
                 )}
 
@@ -984,6 +1048,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                       />
                     </div>
                     <PresetRemarksSelect stepNo={8} stepInputs={stepInputs} setStepInputs={setStepInputs} />
+                    <PcbTypeWarning stepNo={8} inputs={stepInputs} />
                   </div>
                 )}
 
@@ -1000,6 +1065,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                       />
                     </div>
                     <PresetRemarksSelect stepNo={9} stepInputs={stepInputs} setStepInputs={setStepInputs} />
+                    <PcbTypeWarning stepNo={9} inputs={stepInputs} />
                   </div>
                 )}
 
@@ -1024,6 +1090,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                       />
                     </div>
                     <PresetRemarksSelect stepNo={10} stepInputs={stepInputs} setStepInputs={setStepInputs} />
+                    <PcbTypeWarning stepNo={10} inputs={stepInputs} />
                   </div>
                 )}
 

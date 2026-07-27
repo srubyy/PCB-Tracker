@@ -910,6 +910,7 @@ const syncExcelPanels = async (lotId, sheets) => {
     if (!dummy && !rawBarcode) continue;
 
     const hasRealBarcode = rawBarcode && rawBarcode !== '-';
+    const barcode = hasRealBarcode ? rawBarcode : (dummy || `DUMMY-${lotId}-${r + 1}-${Date.now()}`);
     const mfgYear = hasRealBarcode ? extractMfgYear(rawBarcode) : null;
     let status = 'Repairable';
     let scrapReason = null;
@@ -930,7 +931,7 @@ const syncExcelPanels = async (lotId, sheets) => {
         sr_no: r + 1,
         dummy_sr_no: dummy,
         real_sr_no: hasRealBarcode ? rawBarcode : '',
-        barcode: hasRealBarcode ? rawBarcode : '',
+        barcode: barcode,
         box_no: 'Box 1',
         mfg_year: mfgYear,
         part_code: partCode,
@@ -944,7 +945,7 @@ const syncExcelPanels = async (lotId, sheets) => {
       await pool.query(`
         INSERT INTO panels (lot_id, sr_no, dummy_sr_no, real_sr_no, barcode, box_no, mfg_year, part_code, model, status, scrap_reason, excel_data, current_step)
         VALUES ($1, $2, $3, $4, $5, 'Box 1', $6, $7, $8, $9, $10, $11, 1)
-      `, [lotId, r + 1, dummy, hasRealBarcode ? rawBarcode : '', hasRealBarcode ? rawBarcode : '', mfgYear, partCode, model, status, scrapReason, JSON.stringify(excelData)]);
+      `, [lotId, r + 1, dummy, hasRealBarcode ? rawBarcode : '', barcode, mfgYear, partCode, model, status, scrapReason, JSON.stringify(excelData)]);
     }
   }
 };

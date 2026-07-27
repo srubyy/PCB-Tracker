@@ -544,19 +544,122 @@ export const getLotProductionStats = async (req, res) => {
     };
 
     const partCodeCounts = {};
+    const step6PartCodeCounts = {};
     if (isFallback()) {
       const panels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lotId);
       panels.forEach(p => {
         const pc = p.part_code || '';
         partCodeCounts[pc] = (partCodeCounts[pc] || 0) + 1;
       });
+
+      const step6Scans = (memoryDb.tables.checkpoint_scans || []).filter(
+        cs => cs.lot_id === lotId && cs.checkpoint_step === 6 && !cs.is_unknown
+      );
+      step6Scans.forEach(cs => {
+        const p = (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id);
+        if (p) {
+          const pc = p.part_code || '';
+          step6PartCodeCounts[pc] = (step6PartCodeCounts[pc] || 0) + 1;
+        }
+      });
     } else {
       const pRes = await pool.query('SELECT part_code, COUNT(*)::integer FROM panels WHERE lot_id = $1 GROUP BY part_code', [lotId]);
       pRes.rows.forEach(row => {
         partCodeCounts[row.part_code || ''] = row.count;
       });
+
+      const s6Res = await pool.query(`
+        SELECT p.part_code, COUNT(*)::integer 
+        FROM checkpoint_scans cs
+        JOIN panels p ON cs.panel_id = p.id
+        WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND cs.is_unknown = FALSE
+        GROUP BY p.part_code
+      `, [lotId]);
+      s6Res.rows.forEach(row => {
+        step6PartCodeCounts[row.part_code || ''] = row.count;
+      });
     }
     stats.part_code_counts = partCodeCounts;
+    stats.step6_part_code_counts = step6PartCodeCounts;
+
+    const pcbTypeStats = {};
+    if (isFallback()) {
+      const allLogs = [
+        ...memoryDb.tables.production_logs.filter(l => l.lot_id === lotId),
+        ...memoryDb.tables.pending_production_logs.filter(l => l.lot_id === lotId && !['Approved', 'Rejected'].includes(l.approval_status))
+      ];
+      allLogs.forEach(log => {
+        const key = `${log.step_no}_${log.pcb_type}`;
+        if (!pcbTypeStats[key]) {
+          pcbTypeStats[key] = {
+            step_no: log.step_no,
+            pcb_type: log.pcb_type,
+            repairable_qty: 0, scrap_qty: 0,
+            code_ok: 0, code_not_ok: 0,
+            qty_passed: 0, qty_failed: 0,
+            debug_ok: 0, critical_qty: 0,
+            entry_count: 0, qty_cleaned: 0,
+            qc_reject: 0, qty_coated: 0,
+            bubble_packed: 0, box_packed: 0
+          };
+        }
+        const fields = [
+          'repairable_qty', 'scrap_qty', 'code_ok', 'code_not_ok',
+          'qty_passed', 'qty_failed', 'debug_ok', 'critical_qty',
+          'entry_count', 'qty_cleaned', 'qc_reject', 'qty_coated',
+          'bubble_packed', 'box_packed'
+        ];
+        fields.forEach(f => {
+          pcbTypeStats[key][f] += parseInt(log.step_data?.[f] || 0);
+        });
+      });
+    } else {
+      const pcbRes = await pool.query(`
+        SELECT step_no, pcb_type,
+               COALESCE(SUM((step_data->>'repairable_qty')::integer), 0) AS repairable_qty,
+               COALESCE(SUM((step_data->>'scrap_qty')::integer), 0) AS scrap_qty,
+               COALESCE(SUM((step_data->>'code_ok')::integer), 0) AS code_ok,
+               COALESCE(SUM((step_data->>'code_not_ok')::integer), 0) AS code_not_ok,
+               COALESCE(SUM((step_data->>'qty_passed')::integer), 0) AS qty_passed,
+               COALESCE(SUM((step_data->>'qty_failed')::integer), 0) AS qty_failed,
+               COALESCE(SUM((step_data->>'debug_ok')::integer), 0) AS debug_ok,
+               COALESCE(SUM((step_data->>'critical_qty')::integer), 0) AS critical_qty,
+               COALESCE(SUM((step_data->>'entry_count')::integer), 0) AS entry_count,
+               COALESCE(SUM((step_data->>'qty_cleaned')::integer), 0) AS qty_cleaned,
+               COALESCE(SUM((step_data->>'qc_reject')::integer), 0) AS qc_reject,
+               COALESCE(SUM((step_data->>'qty_coated')::integer), 0) AS qty_coated,
+               COALESCE(SUM((step_data->>'bubble_packed')::integer), 0) AS bubble_packed,
+               COALESCE(SUM((step_data->>'box_packed')::integer), 0) AS box_packed
+        FROM (
+          SELECT lot_id, step_no, pcb_type, step_data FROM production_logs WHERE lot_id = $1
+          UNION ALL
+          SELECT lot_id, step_no, pcb_type, step_data FROM pending_production_logs WHERE lot_id = $1 AND approval_status NOT IN ('Approved', 'Rejected')
+        ) combined
+        GROUP BY step_no, pcb_type
+      `, [lotId]);
+      pcbRes.rows.forEach(row => {
+        const key = `${row.step_no}_${row.pcb_type}`;
+        pcbTypeStats[key] = {
+          step_no: row.step_no,
+          pcb_type: row.pcb_type,
+          repairable_qty: parseInt(row.repairable_qty || 0),
+          scrap_qty: parseInt(row.scrap_qty || 0),
+          code_ok: parseInt(row.code_ok || 0),
+          code_not_ok: parseInt(row.code_not_ok || 0),
+          qty_passed: parseInt(row.qty_passed || 0),
+          qty_failed: parseInt(row.qty_failed || 0),
+          debug_ok: parseInt(row.debug_ok || 0),
+          critical_qty: parseInt(row.critical_qty || 0),
+          entry_count: parseInt(row.entry_count || 0),
+          qty_cleaned: parseInt(row.qty_cleaned || 0),
+          qc_reject: parseInt(row.qc_reject || 0),
+          qty_coated: parseInt(row.qty_coated || 0),
+          bubble_packed: parseInt(row.bubble_packed || 0),
+          box_packed: parseInt(row.box_packed || 0)
+        };
+      });
+    }
+    stats.pcb_type_stats = pcbTypeStats;
 
     // Pull aggregates sequentially for the 12 steps
     stats.steps[1] = { inward: lot.received_qty, expected: lot.qty_sent, shortage: lot.qty_sent - lot.received_qty };
