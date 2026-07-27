@@ -152,6 +152,7 @@ export const Audit = {
         const panel = (tables.panels || []).find(p => p.id === m.panel_id);
         const user = m.last_logged_by ? (tables.users || []).find(u => u.id === m.last_logged_by) : null;
         const stepName = m.last_step_id ? (tables.repair_steps || []).find(s => s.step_no === m.last_step_id)?.name : 'Unknown';
+        const resolver = m.resolved_by ? (tables.users || []).find(u => u.id === m.resolved_by) : null;
         return {
           ...m,
           pcb_sr_no: panel ? panel.dummy_sr_no : null,
@@ -161,18 +162,20 @@ export const Audit = {
           mfg_year: panel ? panel.mfg_year : null,
           action: panel ? panel.status : null,
           last_step_name: stepName,
-          last_logged_by_name: user ? user.name : 'Unknown'
+          last_logged_by_name: user ? user.name : 'Unknown',
+          resolved_by_name: resolver ? resolver.name : null
         };
       });
     }
 
     const queryStr = `
       SELECT m.*, p.dummy_sr_no as pcb_sr_no, p.barcode, p.part_code, p.model, p.mfg_year, p.status as action,
-             rs.name as last_step_name, u.name as last_logged_by_name
+             rs.name as last_step_name, u.name as last_logged_by_name, ru.name as resolved_by_name
       FROM missing_pcbs m
       LEFT JOIN panels p ON m.panel_id = p.id
       LEFT JOIN repair_steps rs ON m.last_step_id = rs.step_no
       LEFT JOIN users u ON m.last_logged_by = u.id
+      LEFT JOIN users ru ON m.resolved_by = ru.id
       WHERE m.lot_id = $1 AND m.checkpoint_step = $2
     `;
     const res = await pool.query(queryStr, [lotId, step]);
@@ -201,7 +204,11 @@ export const Audit = {
         last_step_id: last_step_id ? Number(last_step_id) : null,
         last_logged_by: last_logged_by ? Number(last_logged_by) : null,
         last_logged_at: last_logged_at ? new Date(last_logged_at) : null,
-        missing_type
+        missing_type,
+        resolution_action: null,
+        resolution_note: null,
+        resolved_by: null,
+        resolved_at: null
       };
       missingList.push(newMissing);
       return newMissing;
@@ -227,5 +234,102 @@ export const Audit = {
       missing_type
     ]);
     return res.rows[0];
+  },
+
+  // Checkpoint Acknowledgements
+  async getAcknowledgement(lotId, step) {
+    if (isFallback()) {
+      const ack = (tables.checkpoint_acknowledgements || []).find(
+        a => a.lot_id === Number(lotId) && a.checkpoint_step === Number(step)
+      );
+      if (!ack) return null;
+      const user = ack.acknowledged_by ? (tables.users || []).find(u => u.id === ack.acknowledged_by) : null;
+      return {
+        ...ack,
+        acknowledged_by_name: user ? user.name : 'Unknown'
+      };
+    }
+
+    const queryStr = `
+      SELECT ca.*, u.name as acknowledged_by_name
+      FROM checkpoint_acknowledgements ca
+      LEFT JOIN users u ON ca.acknowledged_by = u.id
+      WHERE ca.lot_id = $1 AND ca.checkpoint_step = $2
+    `;
+    const res = await pool.query(queryStr, [lotId, step]);
+    return res.rows[0] || null;
+  },
+
+  async acknowledgeCheckpoint(lotId, step, userId) {
+    if (isFallback()) {
+      const acksList = tables.checkpoint_acknowledgements || [];
+      const idx = acksList.findIndex(
+        a => a.lot_id === Number(lotId) && a.checkpoint_step === Number(step)
+      );
+      const ackObj = {
+        lot_id: Number(lotId),
+        checkpoint_step: Number(step),
+        acknowledged_by: Number(userId),
+        acknowledged_at: new Date()
+      };
+      if (idx !== -1) {
+        acksList[idx] = { ...acksList[idx], ...ackObj };
+      } else {
+        ackObj.id = acksList.reduce((max, a) => Math.max(max, a.id || 0), 0) + 1;
+        acksList.push(ackObj);
+      }
+      return ackObj;
+    }
+
+    const queryStr = `
+      INSERT INTO checkpoint_acknowledgements (lot_id, checkpoint_step, acknowledged_by)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (lot_id, checkpoint_step) DO UPDATE
+      SET acknowledged_by = EXCLUDED.acknowledged_by,
+          acknowledged_at = CURRENT_TIMESTAMP
+      RETURNING *
+    `;
+    const res = await pool.query(queryStr, [lotId, step, userId]);
+    return res.rows[0];
+  },
+
+  // Resolve Missing PCBs
+  async resolveMissingPCB(missingId, action, note, userId) {
+    if (isFallback()) {
+      const missing = (tables.missing_pcbs || []).find(m => m.id === Number(missingId));
+      if (!missing) throw new Error('Missing PCB record not found');
+      missing.resolution_action = action;
+      missing.resolution_note = note;
+      missing.resolved_by = Number(userId);
+      missing.resolved_at = new Date();
+
+      if (action === 'Reassigned' && note) {
+        const panel = (tables.panels || []).find(p => p.id === missing.panel_id);
+        if (panel) {
+          panel.lot_id = Number(note); // reassigned to lot id
+        }
+      }
+      return missing;
+    }
+
+    const queryStr = `
+      UPDATE missing_pcbs
+      SET resolution_action = $1,
+          resolution_note = $2,
+          resolved_by = $3,
+          resolved_at = CURRENT_TIMESTAMP
+      WHERE id = $4
+      RETURNING *
+    `;
+    const res = await pool.query(queryStr, [action, note, userId, missingId]);
+    const updated = res.rows[0];
+
+    if (action === 'Reassigned' && note && updated) {
+      await pool.query(
+        'UPDATE panels SET lot_id = $1 WHERE id = $2',
+        [Number(note), updated.panel_id]
+      );
+    }
+    return updated;
   }
 };

@@ -1979,7 +1979,8 @@ export const exportExcel = async (req, res) => {
       const missingHeaders = [
         "PCB Sr No", "Actual Serial No", "Part Code", "Model", "Mfg Year", 
         "Action", "Last Step Logged", "Logged By", "Last Logged At", 
-        "Checkpoint Where Missing", "Missing Type", "Delta Context"
+        "Checkpoint Where Missing", "Missing Type", "Delta Context",
+        "Resolution Action", "Resolution Note", "Resolved By", "Resolved At"
       ];
       const headerRow = missingSheet.addRow(missingHeaders);
       headerRow.height = 25;
@@ -2033,17 +2034,22 @@ export const exportExcel = async (req, res) => {
           m.last_logged_at ? formatLocalTime(m.last_logged_at) : 'N/A',
           `Step ${m.checkpoint_step}`,
           m.missing_type,
-          deltaContext
+          deltaContext,
+          m.resolution_action || 'Unresolved',
+          m.resolution_note || '-',
+          m.resolved_by_name || '-',
+          m.resolved_at ? formatLocalTime(m.resolved_at) : '-'
         ];
 
         const dataRow = missingSheet.addRow(rowData);
         dataRow.height = 22;
 
         const isNeverTouched = m.missing_type === 'Never touched';
+        const isResolved = !!m.resolution_action;
 
-        // Styling based on missing type
-        const rowBgColor = isNeverTouched ? 'FFFFC7CE' : 'FFFFEB9C'; // Light Red vs Light Amber
-        const rowFontColor = isNeverTouched ? 'FF9C0006' : 'FF9C6500'; // Dark Red vs Dark Amber
+        // Styling based on missing type and resolution status
+        const rowBgColor = isResolved ? 'FFC6EFCE' : (isNeverTouched ? 'FFFFC7CE' : 'FFFFEB9C'); // Green vs Light Red vs Light Amber
+        const rowFontColor = isResolved ? 'FF006100' : (isNeverTouched ? 'FF9C0006' : 'FF9C6500'); // Dark Green vs Dark Red vs Dark Amber
 
         for (let colIdx = 1; colIdx <= missingHeaders.length; colIdx++) {
           const cell = missingSheet.getCell(dataRow.number, colIdx);

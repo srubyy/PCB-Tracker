@@ -284,7 +284,7 @@ function App() {
         {view === 'leaderboard' && (
           <EngineersPage showToast={showToast} />
         )}
-        {view === 'users' && ['Superadmin', 'Manager', 'Team Lead'].includes(user.role) && (
+        {view === 'users' && user.role === 'Team Lead' && (
           <SettingsPage 
             showToast={showToast} 
             onRefreshCompanies={fetchClientsList}

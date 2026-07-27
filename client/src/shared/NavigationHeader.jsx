@@ -52,7 +52,7 @@ const NavigationHeader = ({ view, setView, showToast }) => {
         >
           <Trophy size={18} /> Leaderboard
         </button>
-        {['Superadmin', 'Manager', 'Team Lead'].includes(user.role) && (
+        {user.role === 'Team Lead' && (
           <button 
             onClick={() => setView('users')} 
             className={`app-nav-tab ${view === 'users' ? 'active' : ''}`}

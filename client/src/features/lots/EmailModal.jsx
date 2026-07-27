@@ -15,7 +15,7 @@ const EmailModal = ({ isOpen, onClose, onSubmit, selectedLotForEmail, form, setF
               📧 Discrepancy Email Dispatcher Center
             </h3>
             <p style={{ margin: '4px 0 0 0', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-              Superadmin Action Console • Lot {selectedLotForEmail.lot_no} ({selectedLotForEmail.client_name})
+              Team Lead Action Console • Lot {selectedLotForEmail.lot_no} ({selectedLotForEmail.client_name})
             </p>
           </div>
           <button 

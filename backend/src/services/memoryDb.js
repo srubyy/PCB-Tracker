@@ -33,7 +33,8 @@ export const tables = {
   export_history: [],
   checkpoint_scans: [],
   checkpoint_results: [],
-  missing_pcbs: []
+  missing_pcbs: [],
+  checkpoint_acknowledgements: []
 };
 
 // --- Seed Parsing Helpers ---

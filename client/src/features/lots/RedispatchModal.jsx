@@ -25,7 +25,7 @@ const RedispatchModal = ({ isOpen, onClose, onSubmit, stockData, user, form, set
               onChange={e => setForm({...form, lot_id: e.target.value})}
             >
               <option value="">-- Choose Lot --</option>
-              {stockData.filter(l => l.status !== 'Complete' || ['Superadmin', 'Manager', 'Team Lead'].includes(user?.role)).map(l => (
+              {stockData.filter(l => l.status !== 'Complete' || user?.role === 'Team Lead').map(l => (
                 <option key={l.id} value={l.id}>Lot {l.lot_no} (Avail: {l.available})</option>
               ))}
             </select>

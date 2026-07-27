@@ -53,7 +53,7 @@ const BottomNavigation = ({ view, setView }) => {
         Trophy
       </button>
 
-      {['Superadmin', 'Manager', 'Team Lead'].includes(user.role) && (
+      {user.role === 'Team Lead' && (
         <button 
           onClick={() => setView('users')} 
           className={`nav-item ${view === 'users' ? 'active' : ''}`}

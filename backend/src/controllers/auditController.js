@@ -211,8 +211,132 @@ export const getCheckpointReport = async (req, res) => {
 
   try {
     const results = await Audit.getResults(parsedLotId, parsedStep);
-    const missing = await Audit.getMissing(parsedLotId, parsedStep);
+    const missingRaw = await Audit.getMissing(parsedLotId, parsedStep);
     const scans = await Audit.getScans(parsedLotId, parsedStep);
+    const ack = await Audit.getAcknowledgement(parsedLotId, parsedStep);
+
+    // Fetch timelines for each missing item
+    const missing = [];
+    for (const m of missingRaw) {
+      let timeline = [];
+      if (isFallback()) {
+        timeline = (tables.panel_logs || [])
+          .filter(pl => pl.panel_id === m.panel_id)
+          .map(pl => {
+            const stepObj = (tables.repair_steps || []).find(rs => rs.id === pl.step_id || rs.step_no === pl.step_id);
+            const userObj = (tables.users || []).find(u => u.id === pl.engineer_id);
+            return {
+              step_no: stepObj ? stepObj.step_no : null,
+              step_name: stepObj ? stepObj.name : 'Unknown',
+              logged_by: userObj ? userObj.name : 'Unknown',
+              timestamp: pl.timestamp
+            };
+          })
+          .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+      } else {
+        const timelineRes = await pool.query(
+          `SELECT pl.timestamp, rs.step_no, rs.name as step_name, u.name as logged_by
+           FROM panel_logs pl
+           JOIN repair_steps rs ON pl.step_id = rs.id
+           LEFT JOIN users u ON pl.engineer_id = u.id
+           WHERE pl.panel_id = $1
+           ORDER BY pl.timestamp ASC`,
+          [m.panel_id]
+        );
+        timeline = timelineRes.rows;
+      }
+      missing.push({
+        ...m,
+        timeline
+      });
+    }
+
+    // Process Unknown Scans and Similarity Match
+    const unknownScans = [];
+    for (const s of scans) {
+      if (s.is_unknown) {
+        let matchingPanel = null;
+        const cleanVal = s.scanned_value.trim().toLowerCase();
+        if (isFallback()) {
+          matchingPanel = (tables.panels || []).find(
+            p => p.lot_id !== parsedLotId && (
+              (p.barcode && p.barcode.toLowerCase() === cleanVal) ||
+              (p.dummy_sr_no && p.dummy_sr_no.toLowerCase() === cleanVal)
+            )
+          );
+        } else {
+          const pRes = await pool.query(
+            `SELECT p.*, l.lot_no 
+             FROM panels p
+             JOIN lots l ON p.lot_id = l.id
+             WHERE p.lot_id <> $1 AND (
+               LOWER(p.barcode) = $2 OR LOWER(p.dummy_sr_no) = $2
+             ) LIMIT 1`,
+            [parsedLotId, cleanVal]
+          );
+          if (pRes.rows.length > 0) {
+            matchingPanel = pRes.rows[0];
+          }
+        }
+
+        let possibleMatch = 'No similar match found';
+        if (matchingPanel) {
+          let lotNo = matchingPanel.lot_no;
+          if (isFallback()) {
+            const lotObj = (tables.lots || []).find(l => l.id === matchingPanel.lot_id);
+            lotNo = lotObj ? lotObj.lot_no : 'Unknown';
+          }
+          possibleMatch = `Similar to ${matchingPanel.dummy_sr_no || matchingPanel.barcode} in Lot ${lotNo}`;
+        }
+        unknownScans.push({
+          ...s,
+          possible_match: possibleMatch
+        });
+      }
+    }
+
+    // Compute Scanner Activity
+    const scannerStats = {};
+    scans.forEach(s => {
+      const name = s.scanner_name || 'System';
+      if (!scannerStats[name]) {
+        scannerStats[name] = {
+          name,
+          scanned_count: 0,
+          min_time: null,
+          max_time: null
+        };
+      }
+      scannerStats[name].scanned_count++;
+      const t = new Date(s.timestamp).getTime();
+      if (!scannerStats[name].min_time || t < scannerStats[name].min_time) {
+        scannerStats[name].min_time = t;
+      }
+      if (!scannerStats[name].max_time || t > scannerStats[name].max_time) {
+        scannerStats[name].max_time = t;
+      }
+    });
+
+    const scannerActivity = Object.values(scannerStats).map(stat => {
+      let durationStr = '0s';
+      if (stat.min_time && stat.max_time && stat.min_time !== stat.max_time) {
+        const diffSeconds = Math.round((stat.max_time - stat.min_time) / 1000);
+        const minutes = Math.floor(diffSeconds / 60);
+        const seconds = diffSeconds % 60;
+        if (minutes > 0) {
+          durationStr = `${minutes}m ${seconds}s`;
+        } else {
+          durationStr = `${seconds}s`;
+        }
+      }
+      return {
+        scanner_name: stat.name,
+        pcbs_scanned: stat.scanned_count,
+        time_started: stat.min_time ? new Date(stat.min_time).toISOString() : null,
+        time_completed: stat.max_time ? new Date(stat.max_time).toISOString() : null,
+        duration: durationStr
+      };
+    });
 
     // Dynamic Mismatch computation
     let allPanels = [];
@@ -256,10 +380,9 @@ export const getCheckpointReport = async (req, res) => {
     }
 
     // Group logs by part code and step
-    const partCodeExpectedMap = new Map(); // part_code -> Set of unique panel IDs
-    const partCodeScannedMap = new Map();  // part_code -> Set of unique panel IDs
+    const partCodeExpectedMap = new Map();
+    const partCodeScannedMap = new Map();
 
-    // expected counts from logs
     panelLogs.forEach(l => {
       const panel = panelMap.get(l.panel_id);
       if (panel && panel.part_code) {
@@ -270,7 +393,6 @@ export const getCheckpointReport = async (req, res) => {
       }
     });
 
-    // scanned counts
     scans.forEach(s => {
       if (!s.is_unknown && s.panel_id) {
         const panel = panelMap.get(s.panel_id);
@@ -283,7 +405,6 @@ export const getCheckpointReport = async (req, res) => {
       }
     });
 
-    // Compute step names list
     let stepsList = [];
     if (isFallback()) {
       stepsList = (tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
@@ -293,8 +414,6 @@ export const getCheckpointReport = async (req, res) => {
     }
 
     const mismatches = [];
-
-    // All unique part codes seen in logs or scans
     const allPartCodes = new Set([...partCodeExpectedMap.keys(), ...partCodeScannedMap.keys()]);
 
     for (const partCode of allPartCodes) {
@@ -305,7 +424,6 @@ export const getCheckpointReport = async (req, res) => {
       const scanned = scannedSet.size;
 
       if (expected !== scanned) {
-        // Step-by-step breakdown
         const stepsBreakdown = [];
         let firstStepDropped = null;
         let lastStepCount = null;
@@ -316,14 +434,12 @@ export const getCheckpointReport = async (req, res) => {
             return panel && panel.part_code === partCode && l.step_no === st.step_no;
           });
 
-          // Unique panels of this part code logged at this step
           const uniquePanelIdsAtStep = new Set(stepLogs.map(l => l.panel_id));
           const stepCount = uniquePanelIdsAtStep.size;
 
-          // Trace operators and counts
           const opsMap = {};
           stepLogs.forEach(l => {
-            opsMap[l.engineer_name] = (opsMap[l.engineer_name] || 0) + 1; // can have duplicate logs for same panel, count total transactions
+            opsMap[l.engineer_name] = (opsMap[l.engineer_name] || 0) + 1;
           });
           const loggedByStr = Object.entries(opsMap).map(([name, c]) => `${name} (${c} logs)`).join(', ') || 'No logs';
 
@@ -334,7 +450,6 @@ export const getCheckpointReport = async (req, res) => {
             logged_by: loggedByStr
           });
 
-          // First step where count dropped dynamically:
           if (lastStepCount !== null && stepCount < lastStepCount && !firstStepDropped) {
             firstStepDropped = st.name;
           }
@@ -352,17 +467,58 @@ export const getCheckpointReport = async (req, res) => {
       }
     }
 
-    const totalExpected = results ? results.total_in_scope : loggedPanelIds.size;
+    const totalExpected = results ? results.total_in_scope : allPanels.length;
 
     res.json({
       results,
       missing,
       scans,
+      unknown_scans: unknownScans,
+      scanner_activity: scannerActivity,
       mismatches,
-      totalExpected
+      totalExpected,
+      acknowledgement: ack ? {
+        acknowledged: true,
+        acknowledged_by: ack.acknowledged_by_name,
+        acknowledged_at: ack.acknowledged_at
+      } : {
+        acknowledged: false,
+        acknowledged_by: null,
+        acknowledged_at: null
+      }
     });
   } catch (err) {
     console.error('Get checkpoint report error:', err);
     res.status(500).json({ error: 'Failed to retrieve checkpoint report.' });
+  }
+};
+
+export const acknowledgeCheckpoint = async (req, res) => {
+  const { lot_id, checkpoint_step } = req.body;
+  if (!lot_id || !checkpoint_step) {
+    return res.status(400).json({ error: 'Missing required parameters.' });
+  }
+  const userId = req.user ? req.user.id : null;
+  try {
+    const ack = await Audit.acknowledgeCheckpoint(lot_id, checkpoint_step, userId);
+    res.json({ message: 'Checkpoint acknowledged successfully.', acknowledgement: ack });
+  } catch (err) {
+    console.error('Acknowledge checkpoint error:', err);
+    res.status(500).json({ error: 'Failed to acknowledge checkpoint.' });
+  }
+};
+
+export const resolveMissing = async (req, res) => {
+  const { missing_id, action, note } = req.body;
+  if (!missing_id || !action) {
+    return res.status(400).json({ error: 'Missing required parameters.' });
+  }
+  const userId = req.user ? req.user.id : null;
+  try {
+    const resolved = await Audit.resolveMissingPCB(missing_id, action, note, userId);
+    res.json({ message: 'Missing PCB resolved successfully.', resolved });
+  } catch (err) {
+    console.error('Resolve missing PCB error:', err);
+    res.status(500).json({ error: 'Failed to resolve missing PCB.' });
   }
 };
