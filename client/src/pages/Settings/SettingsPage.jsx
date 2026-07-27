@@ -496,7 +496,6 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
                 >
                   <option value="Employee">Employee (Operations Terminal Entry Only)</option>
                   <option value="Team Lead">Team Lead (Operation Entry + Highest Configuration/Approval Authority)</option>
-                  <option value="Manager">Manager (Operation Entry + final Step approvals)</option>
                 </select>
               </div>
 
@@ -549,8 +548,6 @@ const SettingsPage = ({ showToast, onRefreshCompanies, onRefreshLots }) => {
                 {adminUsers.map((item) => {
                   let badgeClass = 'badge-success';
                   if (item.role === 'Team Lead') badgeClass = 'badge-warning';
-                  else if (item.role === 'Manager') badgeClass = 'badge-info';
-                  else if (item.role === 'Superadmin') badgeClass = 'badge-danger';
 
                   const isSelf = item.id === user?.id;
 

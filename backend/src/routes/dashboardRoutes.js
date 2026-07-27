@@ -4,6 +4,6 @@ import { authenticateJWT, authorize } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.get('/', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead']), getDashboard);
+router.get('/', authenticateJWT, authorize(['Team Lead']), getDashboard);
 
 export default router;

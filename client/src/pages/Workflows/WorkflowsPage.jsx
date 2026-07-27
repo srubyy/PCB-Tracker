@@ -315,7 +315,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     }
   };
 
-  // Clearance Actions (For TL & Managers)
+  // Clearance Actions (For Team Lead)
   const tlApproveProductionLog = async (pendingLogId) => {
     try {
       const res = await apiFetch('/api/production/tl-approve', {
@@ -477,7 +477,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                   Step 6 checkpoint: ✓ Completed — {step6Results.total_scanned} of {step6Results.total_in_scope} scanned — {step6Results.total_missing} missing
                 </span>
               </div>
-              {['Superadmin', 'Team Lead'].includes(user?.role) && (
+              {user?.role === 'Team Lead' && (
                 <button
                   onClick={() => handleOpenReport(6)}
                   className="btn btn-secondary"
@@ -504,7 +504,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                   Step 10 checkpoint: ✓ Completed — {step10Results.total_scanned} of {step10Results.total_in_scope} scanned — {step10Results.total_missing} missing
                 </span>
               </div>
-              {['Superadmin', 'Team Lead'].includes(user?.role) && (
+              {user?.role === 'Team Lead' && (
                 <button
                   onClick={() => handleOpenReport(10)}
                   className="btn btn-secondary"
@@ -1116,7 +1116,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
               </div>
             </div>
           ) : (
-            /* Vetting & Approvals Queue for Selected Step (TL / Manager) */
+            /* Vetting & Approvals Queue for Selected Step (TL) */
             <div>
               <h2 className="vetting-queue-header" style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-primary)', borderBottom: '1px solid var(--card-border)', paddingBottom: 8, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <span>Vetting & Approvals Queue - Step {selectedProductionStep}: {steps[selectedProductionStep - 1]?.name || 'Unknown Step'}</span>

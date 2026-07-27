@@ -1,12 +1,12 @@
 import React from 'react';
 import { AlertTriangle } from 'lucide-react';
 
-const InwardForm = ({ onSubmit, onCancel, newLot, setNewLot, managerSignOff, setManagerSignOff, userRole }) => {
+const InwardForm = ({ onSubmit, onCancel, newLot, setNewLot, teamLeadSignOff, setTeamLeadSignOff, userRole }) => {
   const isDiscrepancy = newLot.qty_sent && newLot.qty_received && parseInt(newLot.qty_sent) !== parseInt(newLot.qty_received);
   const diffQty = isDiscrepancy ? Math.abs(parseInt(newLot.qty_sent) - parseInt(newLot.qty_received)) : 0;
   const isShortage = isDiscrepancy && parseInt(newLot.qty_received) < parseInt(newLot.qty_sent);
 
-  const canSave = !isDiscrepancy || (userRole === 'Team Lead' && managerSignOff);
+  const canSave = !isDiscrepancy || (userRole === 'Team Lead' && teamLeadSignOff);
 
   return (
     <div style={{ borderTop: '1px solid rgba(255,255,255,0.05)', paddingTop: 16 }}>
@@ -92,8 +92,8 @@ const InwardForm = ({ onSubmit, onCancel, newLot, setNewLot, managerSignOff, set
               <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.75rem', cursor: 'pointer', color: 'var(--text-main)', fontWeight: 600 }}>
                 <input 
                   type="checkbox" 
-                  checked={managerSignOff} 
-                  onChange={e => setManagerSignOff(e.target.checked)} 
+                  checked={teamLeadSignOff} 
+                  onChange={e => setTeamLeadSignOff(e.target.checked)} 
                   style={{ width: 'auto' }}
                 />
                 I confirm Team Lead sign-off for this discrepancy.

@@ -45,7 +45,7 @@ const ReportsPage = ({ selectedLotNo, showToast }) => {
         body: JSON.stringify({ pending_log_id: logId })
       });
       if (res.ok) {
-        showToast('Task approved and advanced to Manager final review stage!');
+        showToast('Task approved successfully!');
         fetchApprovals();
       } else {
         const data = await res.json();
@@ -147,7 +147,7 @@ const ReportsPage = ({ selectedLotNo, showToast }) => {
               <div style={{ padding: 10, background: 'rgba(245, 158, 11, 0.05)', borderRadius: 8, border: '1px solid var(--card-border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
                 <div>
                   <strong style={{ fontSize: '0.75rem', color: '#fcd34d' }}>Step 14 (Visual QC Vetting)</strong>
-                  <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Awaiting manager final sign-off</div>
+                  <div style={{ fontSize: '0.6rem', color: 'var(--text-muted)', marginTop: 2 }}>Awaiting Team Lead final sign-off</div>
                 </div>
                 <span style={{ fontSize: '0.75rem', fontWeight: 800, color: '#f59e0b' }}>3 pending</span>
               </div>

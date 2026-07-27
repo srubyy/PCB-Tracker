@@ -4,7 +4,7 @@ import { authenticateJWT, authorize } from '../middlewares/authMiddleware.js';
 
 const router = express.Router();
 
-router.get('/approvals', authenticateJWT, authorize(['Superadmin', 'Manager', 'Team Lead']), getApprovals);
+router.get('/approvals', authenticateJWT, authorize(['Team Lead']), getApprovals);
 router.post('/approvals/tl-approve', authenticateJWT, authorize(['Team Lead']), tlApprove);
 router.post('/approvals/reject', authenticateJWT, authorize(['Team Lead']), rejectLog);
 

@@ -382,7 +382,7 @@ export const progressRepair = async (req, res) => {
       });
     }
 
-    // Admins, Managers, and Team Leads bypass approvals when logging directly
+    // Team Leads bypass approvals when logging directly
     let nextStepNo = currentStepNo;
     let nextStatus = panel.status;
 

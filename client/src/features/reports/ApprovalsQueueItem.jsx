@@ -1,6 +1,6 @@
 import React from 'react';
 
-const ApprovalsQueueItem = ({ log, user, onTLApprove, onManagerApprove, onReject }) => {
+const ApprovalsQueueItem = ({ log, user, onTLApprove, onReject }) => {
   return (
     <div style={{ padding: 16, borderRadius: 12, border: '1px solid var(--card-border)', background: 'var(--card-bg)' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>

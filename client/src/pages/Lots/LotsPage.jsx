@@ -62,7 +62,7 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
     qty_received: '',
     remarks: ''
   });
-  const [managerSignOff, setManagerSignOff] = useState(false);
+  const [teamLeadSignOff, setTeamLeadSignOff] = useState(false);
 
   // Modals visibility & form states
   const [showOutwardModal, setShowOutwardModal] = useState(false);
@@ -238,12 +238,12 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
     const qtyRecv = parseInt(newLot.qty_received);
     const hasDiscrepancy = qtySent !== qtyRecv;
 
-    if (hasDiscrepancy && !['Superadmin', 'Manager', 'Team Lead'].includes(user.role)) {
-      showToast('Team Lead or Manager privilege is required to sign off on discrepancies.', 'danger');
+    if (hasDiscrepancy && user.role !== 'Team Lead') {
+      showToast('Team Lead privilege is required to sign off on discrepancies.', 'danger');
       return;
     }
 
-    if (hasDiscrepancy && !managerSignOff) {
+    if (hasDiscrepancy && !teamLeadSignOff) {
       showToast('You must confirm sign-off for this discrepancy.', 'warning');
       return;
     }
@@ -274,7 +274,7 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
           qty_received: '',
           remarks: ''
         });
-        setManagerSignOff(false);
+        setTeamLeadSignOff(false);
         fetchStock();
         fetchClients();
         if (onRefreshLots) onRefreshLots();
@@ -1725,11 +1725,11 @@ const LotsPage = ({ selectedLotNo, selectedCompany, showToast, onRefreshLots }) 
               {showInwardForm && (
                 <InwardForm 
                   onSubmit={handleInwardSubmit}
-                  onCancel={() => { setShowInwardForm(false); setManagerSignOff(false); }}
+                  onCancel={() => { setShowInwardForm(false); setTeamLeadSignOff(false); }}
                   newLot={newLot}
                   setNewLot={setNewLot}
-                  managerSignOff={managerSignOff}
-                  setManagerSignOff={setManagerSignOff}
+                  teamLeadSignOff={teamLeadSignOff}
+                  setTeamLeadSignOff={setTeamLeadSignOff}
                   userRole={user?.role}
                 />
               )}

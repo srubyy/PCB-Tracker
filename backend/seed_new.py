@@ -15,7 +15,7 @@ clients = [
 ]
 
 users = [
-    {"name": "Super Admin", "role": "Superadmin", "attendance": 100.0, "email": "superadmin@electrolytesoln.com"},
+    {"name": "Lead Admin", "role": "Team Lead", "attendance": 100.0, "email": "superadmin@electrolytesoln.com"},
     {"name": "Rahul Gupta", "role": "Team Lead", "attendance": 98.2, "email": "rahul.gupta@electrolytesoln.com"},
     {"name": "Mayuri S", "role": "Employee", "attendance": 96.5, "email": "mayuri.s@electrolytesoln.com"},
     {"name": "Akash P", "role": "Employee", "attendance": 94.0, "email": "akash.p@electrolytesoln.com"},

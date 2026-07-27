@@ -185,7 +185,7 @@ export const outward = async (req, res) => {
         await txClient.query('ROLLBACK');
         txClient.release();
       }
-      return res.status(403).json({ error: "Access denied. This lot is completed and locked. Only a Superadmin can perform transactions." });
+      return res.status(403).json({ error: "Access denied. This lot is completed and locked. Only a Team Lead can perform transactions." });
     }
 
     // Verify stock
@@ -260,7 +260,7 @@ export const customerReturn = async (req, res) => {
         await txClient.query('ROLLBACK');
         txClient.release();
       }
-      return res.status(403).json({ error: "Access denied. This lot is completed and locked. Only a Superadmin can perform transactions." });
+      return res.status(403).json({ error: "Access denied. This lot is completed and locked. Only a Team Lead can perform transactions." });
     }
 
     // Update returned qty
@@ -324,7 +324,7 @@ export const redispatch = async (req, res) => {
         await txClient.query('ROLLBACK');
         txClient.release();
       }
-      return res.status(403).json({ error: "Access denied. This lot is completed and locked. Only a Superadmin can perform transactions." });
+      return res.status(403).json({ error: "Access denied. This lot is completed and locked. Only a Team Lead can perform transactions." });
     }
 
     // Verify stock availability
@@ -439,7 +439,7 @@ export const toggleComplete = async (req, res) => {
 
     const currentStatus = lot.status;
 
-    // Lock check: Only Superadmin / Manager / Team Lead can unlock a completed lot
+    // Lock check: Only Team Lead can unlock a completed lot
     if (currentStatus === 'Complete' && req.user.role === 'Employee') {
       if (useTx) {
         await txClient.query('ROLLBACK');
