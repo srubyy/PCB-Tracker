@@ -204,6 +204,18 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     }
   };
 
+  const getExpectedQtyForSelectedPcbType = () => {
+    if (!lotProductionStats) return 0;
+    if (!lotProductionStats.part_code_counts || Object.keys(lotProductionStats.part_code_counts).length === 0) {
+      return lotProductionStats.received_qty;
+    }
+    const partCodePrefix = productionPcbType.split(' - ')[0].trim().toLowerCase();
+    const matchedKey = Object.keys(lotProductionStats.part_code_counts).find(
+      key => key.trim().toLowerCase() === partCodePrefix
+    );
+    return matchedKey ? lotProductionStats.part_code_counts[matchedKey] : 0;
+  };
+
   const fetchCheckpointResults = async (lotId = productionLotId) => {
     if (!lotId) {
       setStep6Results(null);
@@ -790,11 +802,19 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                     </div>
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-muted)' }}>
                       Total Inspected (Repairable + Scrap): <strong>{(parseInt(stepInputs.repairable_qty || 0) + parseInt(stepInputs.scrap_qty || 0))} PCBs</strong>.
-                      {lotProductionStats && (parseInt(stepInputs.repairable_qty || 0) + parseInt(stepInputs.scrap_qty || 0)) !== lotProductionStats.received_qty && (
-                        <span style={{ color: '#ef4444', display: 'block', marginTop: 4 }}>
-                          ⚠️ Warning: Total must equal lot received count ({lotProductionStats.received_qty})!
-                        </span>
-                      )}
+                      {(() => {
+                        const expectedQty = getExpectedQtyForSelectedPcbType();
+                        const sum = parseInt(stepInputs.repairable_qty || 0) + parseInt(stepInputs.scrap_qty || 0);
+                        if (lotProductionStats && sum !== expectedQty) {
+                          const partCodePrefix = productionPcbType.split(' - ')[0].trim();
+                          return (
+                            <span style={{ color: '#ef4444', display: 'block', marginTop: 4 }}>
+                              ⚠️ Warning: Total must equal lot received count for {partCodePrefix} ({expectedQty})!
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
                     </div>
                     <PresetRemarksSelect stepNo={2} stepInputs={stepInputs} setStepInputs={setStepInputs} />
                   </div>

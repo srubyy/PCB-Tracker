@@ -476,6 +476,21 @@ export const getLotProductionStats = async (req, res) => {
       steps: {}
     };
 
+    const partCodeCounts = {};
+    if (isFallback()) {
+      const panels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lotId);
+      panels.forEach(p => {
+        const pc = p.part_code || '';
+        partCodeCounts[pc] = (partCodeCounts[pc] || 0) + 1;
+      });
+    } else {
+      const pRes = await pool.query('SELECT part_code, COUNT(*)::integer FROM panels WHERE lot_id = $1 GROUP BY part_code', [lotId]);
+      pRes.rows.forEach(row => {
+        partCodeCounts[row.part_code || ''] = row.count;
+      });
+    }
+    stats.part_code_counts = partCodeCounts;
+
     // Pull aggregates sequentially for the 12 steps
     stats.steps[1] = { inward: lot.received_qty, expected: lot.qty_sent, shortage: lot.qty_sent - lot.received_qty };
     stats.steps[2] = await getStepSum(lotId, 2, ['repairable_qty', 'scrap_qty'], false);

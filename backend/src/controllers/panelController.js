@@ -584,6 +584,8 @@ export const importPanels = async (req, res) => {
       const barcode = real || `ESRP2${pitchStr}${lot.lot_no}E26${lot.batch_no}${sideChar}${srStr}`;
 
       const excelData = p.excel_data ? JSON.stringify(p.excel_data) : null;
+      const partCode = p.excel_data ? (p.excel_data.part_code || p.excel_data.PartCode || p.excel_data.Col_3 || '') : '';
+      const model = p.excel_data ? (p.excel_data.model || p.excel_data.Model || p.excel_data.Col_5 || '') : '';
 
       let newPanel;
       if (isFallback()) {
@@ -601,6 +603,8 @@ export const importPanels = async (req, res) => {
           real_sr_no: real,
           mfg_year: mfgYear,
           box_no: box,
+          part_code: partCode,
+          model: model,
           excel_data: p.excel_data || null,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -619,10 +623,10 @@ export const importPanels = async (req, res) => {
       } else {
         // Insert panel
         const insRes = await txClient.query(`
-          INSERT INTO panels (lot_id, sr_no, side, barcode, status, scrap_reason, current_step, dummy_sr_no, real_sr_no, mfg_year, box_no, excel_data)
-          VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11)
+          INSERT INTO panels (lot_id, sr_no, side, barcode, status, scrap_reason, current_step, dummy_sr_no, real_sr_no, mfg_year, box_no, part_code, model, excel_data)
+          VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11, $12, $13)
           RETURNING *
-        `, [lot.id, srNo, side, barcode, status, scrapReason, dummy, real, mfgYear, box, excelData]);
+        `, [lot.id, srNo, side, barcode, status, scrapReason, dummy, real, mfgYear, box, partCode, model, excelData]);
         newPanel = insRes.rows[0];
 
         // Fetch step_id for step 1 of this client
@@ -760,6 +764,9 @@ export const createPanel = async (req, res) => {
     const srStr = String(srNo).padStart(4, '0');
     const barcode = real || `ESRP2${pitchStr}${lot.lot_no}E26${lot.batch_no}${sideChar}${srStr}`;
 
+    const partCode = excel_data ? (excel_data.part_code || excel_data.PartCode || excel_data.Col_3 || '') : '';
+    const model = excel_data ? (excel_data.model || excel_data.Model || excel_data.Col_5 || '') : '';
+
     let newPanel;
     if (isFallback()) {
       newPanel = {
@@ -776,6 +783,8 @@ export const createPanel = async (req, res) => {
         real_sr_no: real,
         mfg_year: mfgYear,
         box_no: box,
+        part_code: partCode,
+        model: model,
         excel_data: excel_data || {},
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString()
@@ -783,10 +792,10 @@ export const createPanel = async (req, res) => {
       memoryDb.tables.panels.push(newPanel);
     } else {
       const insRes = await pool.query(`
-        INSERT INTO panels (lot_id, sr_no, side, barcode, status, scrap_reason, current_step, dummy_sr_no, real_sr_no, mfg_year, box_no, excel_data)
-        VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11)
+        INSERT INTO panels (lot_id, sr_no, side, barcode, status, scrap_reason, current_step, dummy_sr_no, real_sr_no, mfg_year, box_no, part_code, model, excel_data)
+        VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11, $12, $13, $14)
         RETURNING *
-      `, [lot.id, srNo, sideVal, barcode, status, scrapReason, dummy, real, mfgYear, box, excel_data ? JSON.stringify(excel_data) : null]);
+      `, [lot.id, srNo, sideVal, barcode, status, scrapReason, dummy, real, mfgYear, box, partCode, model, excel_data ? JSON.stringify(excel_data) : null]);
       newPanel = insRes.rows[0];
     }
 
@@ -820,6 +829,8 @@ const findColumnIndices = (sheetRows) => {
   let dummyColIdx = -1;
   let barcodeColIdx = -1;
   let mfgYearColIdx = -1;
+  let partCodeColIdx = -1;
+  let modelColIdx = -1;
 
   for (let r = 0; r < Math.min(sheetRows.length, 20); r++) {
     const row = sheetRows[r];
@@ -835,9 +846,15 @@ const findColumnIndices = (sheetRows) => {
       if (mfgYearColIdx === -1 && (val === 'mfg year' || val === 'mfg_year' || val === 'year')) {
         mfgYearColIdx = c;
       }
+      if (partCodeColIdx === -1 && (val === 'part code' || val === 'part_code' || val === 'partcode')) {
+        partCodeColIdx = c;
+      }
+      if (modelColIdx === -1 && (val === 'model' || val === 'model name' || val === 'product model')) {
+        modelColIdx = c;
+      }
     }
   }
-  return { dummyColIdx, barcodeColIdx, mfgYearColIdx };
+  return { dummyColIdx, barcodeColIdx, mfgYearColIdx, partCodeColIdx, modelColIdx };
 };
 
 const syncExcelPanels = async (lotId, sheets) => {
@@ -867,7 +884,7 @@ const syncExcelPanels = async (lotId, sheets) => {
   if (!targetSheetName) return;
 
   const rows = sheets[targetSheetName];
-  const { dummyColIdx, barcodeColIdx } = findColumnIndices(rows);
+  const { dummyColIdx, barcodeColIdx, partCodeColIdx, modelColIdx } = findColumnIndices(rows);
 
   if (isFallback()) {
     memoryDb.tables.panels = memoryDb.tables.panels.filter(p => p.lot_id !== lotId);
@@ -879,6 +896,8 @@ const syncExcelPanels = async (lotId, sheets) => {
     const row = rows[r];
     const dummy = dummyColIdx !== -1 ? String(row[dummyColIdx] || '').trim() : '';
     const rawBarcode = barcodeColIdx !== -1 ? String(row[barcodeColIdx] || '').trim() : '';
+    const partCode = partCodeColIdx !== -1 ? String(row[partCodeColIdx] || '').trim() : '';
+    const model = modelColIdx !== -1 ? String(row[modelColIdx] || '').trim() : '';
 
     if (r < 5) {
       const isHeader = [dummy, rawBarcode].some(val => {
@@ -914,6 +933,8 @@ const syncExcelPanels = async (lotId, sheets) => {
         barcode: hasRealBarcode ? rawBarcode : '',
         box_no: 'Box 1',
         mfg_year: mfgYear,
+        part_code: partCode,
+        model: model,
         status,
         scrap_reason: scrapReason,
         excel_data: excelData,
@@ -921,9 +942,9 @@ const syncExcelPanels = async (lotId, sheets) => {
       });
     } else {
       await pool.query(`
-        INSERT INTO panels (lot_id, sr_no, dummy_sr_no, real_sr_no, barcode, box_no, mfg_year, status, scrap_reason, excel_data, current_step)
-        VALUES ($1, $2, $3, $4, $5, 'Box 1', $6, $7, $8, $9, 1)
-      `, [lotId, r + 1, dummy, hasRealBarcode ? rawBarcode : '', hasRealBarcode ? rawBarcode : '', mfgYear, status, scrapReason, JSON.stringify(excelData)]);
+        INSERT INTO panels (lot_id, sr_no, dummy_sr_no, real_sr_no, barcode, box_no, mfg_year, part_code, model, status, scrap_reason, excel_data, current_step)
+        VALUES ($1, $2, $3, $4, $5, 'Box 1', $6, $7, $8, $9, $10, $11, 1)
+      `, [lotId, r + 1, dummy, hasRealBarcode ? rawBarcode : '', hasRealBarcode ? rawBarcode : '', mfgYear, partCode, model, status, scrapReason, JSON.stringify(excelData)]);
     }
   }
 };
@@ -1178,7 +1199,7 @@ export const saveCellEdit = async (req, res) => {
     if (fs.existsSync(finalJsonPath)) {
       const sheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
       const rows = sheets[sheet_name] || [];
-      const { dummyColIdx, barcodeColIdx } = findColumnIndices(rows);
+      const { dummyColIdx, barcodeColIdx, partCodeColIdx, modelColIdx } = findColumnIndices(rows);
       const srNo = parseInt(row_idx, 10) + 1;
 
       let updateField = null;
@@ -1188,6 +1209,10 @@ export const saveCellEdit = async (req, res) => {
         updateField = 'dummy_sr_no';
       } else if (String(col_idx) === String(barcodeColIdx) || String(col_idx) === 'actual_serial_no') {
         updateField = 'real_sr_no';
+      } else if (String(col_idx) === String(partCodeColIdx)) {
+        updateField = 'part_code';
+      } else if (String(col_idx) === String(modelColIdx)) {
+        updateField = 'model';
       } else if (String(col_idx) === 'box_no') {
         updateField = 'box_no';
       } else if (String(col_idx) === 'repairable') {
