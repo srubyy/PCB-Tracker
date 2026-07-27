@@ -5,6 +5,7 @@ import { Panel } from '../models/Panel.js';
 import { Lot } from '../models/Lot.js';
 import { PendingLog } from '../models/PendingLog.js';
 import { RepairStep } from '../models/RepairStep.js';
+import { Audit } from '../models/Audit.js';
 import * as memoryDb from '../services/memoryDb.js';
 import { exec } from 'child_process';
 import fs from 'fs';
@@ -1829,6 +1830,297 @@ export const exportExcel = async (req, res) => {
       });
 
       historySheet.columns.forEach(column => {
+        let maxLen = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const val = String(cell.value || '');
+          if (val) maxLen = Math.max(maxLen, val.length);
+        });
+        column.width = Math.max(maxLen + 4, 12);
+      });
+    }
+
+    // 10. Append Physical Audit Checkpoint sheets if completed
+    const results6 = await Audit.getResults(lotId, 6);
+    const results10 = await Audit.getResults(lotId, 10);
+
+    if (results6 || results10) {
+      // Helper function to dynamically compute mismatches
+      const computeMismatchesForExcel = async (lId, stepNo) => {
+        const inScopeSteps = stepNo === 6 ? [1, 2, 3, 4, 5] : [7, 8, 9];
+        const scans = await Audit.getScans(lId, stepNo);
+        let allPanels = [];
+        if (isFallback()) {
+          allPanels = (tables.panels || []).filter(p => p.lot_id === lId);
+        } else {
+          const panelRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1', [lId]);
+          allPanels = panelRes.rows;
+        }
+        const panelMap = new Map(allPanels.map(p => [p.id, p]));
+
+        let panelLogs = [];
+        if (isFallback()) {
+          panelLogs = (tables.panel_logs || []).filter(log => {
+            const p = panelMap.get(log.panel_id);
+            if (!p) return false;
+            const stepObj = (tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+            const stepNoVal = stepObj ? stepObj.step_no : null;
+            return inScopeSteps.includes(stepNoVal);
+          }).map(log => {
+            const stepObj = (tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+            return {
+              ...log,
+              step_no: stepObj ? stepObj.step_no : null,
+              step_name: stepObj ? stepObj.name : 'Unknown',
+              engineer_name: (tables.users || []).find(u => u.id === log.engineer_id)?.name || 'Unknown'
+            };
+          });
+        } else {
+          const logRes = await pool.query(
+            `SELECT pl.*, rs.step_no, rs.name as step_name, u.name as engineer_name
+             FROM panel_logs pl
+             JOIN repair_steps rs ON pl.step_id = rs.id
+             LEFT JOIN users u ON pl.engineer_id = u.id
+             JOIN panels p ON pl.panel_id = p.id
+             WHERE p.lot_id = $1 AND rs.step_no = ANY($2)`,
+            [lId, inScopeSteps]
+          );
+          panelLogs = logRes.rows;
+        }
+
+        const partCodeExpectedMap = new Map();
+        const partCodeScannedMap = new Map();
+
+        panelLogs.forEach(l => {
+          const panel = panelMap.get(l.panel_id);
+          if (panel && panel.part_code) {
+            if (!partCodeExpectedMap.has(panel.part_code)) partCodeExpectedMap.set(panel.part_code, new Set());
+            partCodeExpectedMap.get(panel.part_code).add(l.panel_id);
+          }
+        });
+
+        scans.forEach(s => {
+          if (!s.is_unknown && s.panel_id) {
+            const panel = panelMap.get(s.panel_id);
+            if (panel && panel.part_code) {
+              if (!partCodeScannedMap.has(panel.part_code)) partCodeScannedMap.set(panel.part_code, new Set());
+              partCodeScannedMap.get(panel.part_code).add(s.panel_id);
+            }
+          }
+        });
+
+        let stepsList = [];
+        if (isFallback()) {
+          stepsList = (tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
+        } else {
+          const stepsRes = await pool.query('SELECT * FROM repair_steps WHERE step_no = ANY($1) ORDER BY step_no', [inScopeSteps]);
+          stepsList = stepsRes.rows;
+        }
+
+        const mismatchesList = [];
+        const allPartCodes = new Set([...partCodeExpectedMap.keys(), ...partCodeScannedMap.keys()]);
+
+        for (const partCode of allPartCodes) {
+          const expected = (partCodeExpectedMap.get(partCode) || new Set()).size;
+          const scanned = (partCodeScannedMap.get(partCode) || new Set()).size;
+
+          if (expected !== scanned) {
+            const stepsBreakdown = [];
+            let firstStepDropped = null;
+            let lastStepCount = null;
+
+            for (const st of stepsList) {
+              const stepLogs = panelLogs.filter(l => {
+                const panel = panelMap.get(l.panel_id);
+                return panel && panel.part_code === partCode && l.step_no === st.step_no;
+              });
+              const stepCount = new Set(stepLogs.map(l => l.panel_id)).size;
+
+              const opsMap = {};
+              stepLogs.forEach(l => { opsMap[l.engineer_name] = (opsMap[l.engineer_name] || 0) + 1; });
+              const loggedByStr = Object.entries(opsMap).map(([name, c]) => `${name} (${c})`).join(', ') || 'No logs';
+
+              stepsBreakdown.push(`${st.name}: ${stepCount} logged by [${loggedByStr}]`);
+
+              if (lastStepCount !== null && stepCount < lastStepCount && !firstStepDropped) {
+                firstStepDropped = st.name;
+              }
+              lastStepCount = stepCount;
+            }
+
+            mismatchesList.push({
+              part_code: partCode,
+              expected,
+              scanned,
+              delta: expected - scanned,
+              steps_breakdown: stepsBreakdown.join(' | '),
+              first_step_dropped: firstStepDropped || 'N/A'
+            });
+          }
+        }
+        return mismatchesList;
+      };
+
+      const mismatches6 = await computeMismatchesForExcel(lotId, 6);
+      const mismatches10 = await computeMismatchesForExcel(lotId, 10);
+      const allMismatches = [
+        ...mismatches6.map(m => ({ ...m, step: 6 })),
+        ...mismatches10.map(m => ({ ...m, step: 10 }))
+      ];
+
+      // Fetch missing list
+      const missing6 = await Audit.getMissing(lotId, 6);
+      const missing10 = await Audit.getMissing(lotId, 10);
+      const allMissing = [...missing6, ...missing10];
+
+      // Sheet 1: 🔴 Missing PCBs
+      const missingSheet = workbook.addWorksheet("🔴 Missing PCBs");
+      missingSheet.views = [{ showGridLines: true }];
+
+      const missingHeaders = [
+        "PCB Sr No", "Actual Serial No", "Part Code", "Model", "Mfg Year", 
+        "Action", "Last Step Logged", "Logged By", "Last Logged At", 
+        "Checkpoint Where Missing", "Missing Type", "Delta Context"
+      ];
+      const headerRow = missingSheet.addRow(missingHeaders);
+      headerRow.height = 25;
+
+      const borderStyle = {
+        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
+        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
+      };
+
+      const redHeaderFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFC00000' }
+      };
+      const whiteHeaderFont = {
+        name: 'Arial',
+        size: 10,
+        bold: true,
+        color: { argb: 'FFFFFFFF' }
+      };
+
+      for (let colIdx = 1; colIdx <= missingHeaders.length; colIdx++) {
+        const cell = missingSheet.getCell(1, colIdx);
+        cell.fill = redHeaderFill;
+        cell.font = whiteHeaderFont;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = borderStyle;
+      }
+
+      // Add missing rows
+      allMissing.forEach(m => {
+        // Compute delta context string if mismatch exists
+        const stepMismatches = m.checkpoint_step === 6 ? mismatches6 : mismatches10;
+        const mismatch = stepMismatches.find(mis => mis.part_code === m.part_code);
+        let deltaContext = '';
+        if (mismatch) {
+          deltaContext = `Part code ${m.part_code}: ${mismatch.expected} expected at Step ${m.checkpoint_step}, only ${mismatch.scanned} scanned — ${mismatch.delta} missing`;
+        }
+
+        const rowData = [
+          m.pcb_sr_no || '-',
+          m.barcode || '-',
+          m.part_code || '-',
+          m.model || '-',
+          m.mfg_year || '-',
+          m.action || '-',
+          m.last_step_name || 'N/A',
+          m.last_logged_by_name || 'N/A',
+          m.last_logged_at ? formatLocalTime(m.last_logged_at) : 'N/A',
+          `Step ${m.checkpoint_step}`,
+          m.missing_type,
+          deltaContext
+        ];
+
+        const dataRow = missingSheet.addRow(rowData);
+        dataRow.height = 22;
+
+        const isNeverTouched = m.missing_type === 'Never touched';
+
+        // Styling based on missing type
+        const rowBgColor = isNeverTouched ? 'FFFFC7CE' : 'FFFFEB9C'; // Light Red vs Light Amber
+        const rowFontColor = isNeverTouched ? 'FF9C0006' : 'FF9C6500'; // Dark Red vs Dark Amber
+
+        for (let colIdx = 1; colIdx <= missingHeaders.length; colIdx++) {
+          const cell = missingSheet.getCell(dataRow.number, colIdx);
+          cell.font = { name: 'Arial', size: 10, color: { argb: rowFontColor } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBgColor } };
+          cell.border = borderStyle;
+          cell.alignment = { horizontal: 'left', vertical: 'middle' };
+        }
+      });
+
+      // Auto fit columns
+      missingSheet.columns.forEach(column => {
+        let maxLen = 0;
+        column.eachCell({ includeEmpty: true }, cell => {
+          const val = String(cell.value || '');
+          if (val) maxLen = Math.max(maxLen, val.length);
+        });
+        column.width = Math.max(maxLen + 4, 12);
+      });
+
+      // Sheet 2: ⚠️ Count Mismatch
+      const mismatchSheet = workbook.addWorksheet("⚠️ Count Mismatch");
+      mismatchSheet.views = [{ showGridLines: true }];
+
+      const mismatchHeaders = [
+        "Checkpoint", "Part Code", "Step-by-step breakdown", 
+        "Total expected at checkpoint", "Total scanned at checkpoint", "Delta", 
+        "First step where count dropped"
+      ];
+      const misHeaderRow = mismatchSheet.addRow(mismatchHeaders);
+      misHeaderRow.height = 25;
+
+      const orangeHeaderFill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: 'FFE26B0A' } // Premium Orange
+      };
+
+      for (let colIdx = 1; colIdx <= mismatchHeaders.length; colIdx++) {
+        const cell = mismatchSheet.getCell(1, colIdx);
+        cell.fill = orangeHeaderFill;
+        cell.font = whiteHeaderFont;
+        cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        cell.border = borderStyle;
+      }
+
+      // Add mismatch rows
+      allMismatches.forEach(m => {
+        const rowData = [
+          `Step ${m.step}`,
+          m.part_code,
+          m.steps_breakdown,
+          m.expected,
+          m.scanned,
+          m.delta,
+          m.first_step_dropped
+        ];
+
+        const dataRow = mismatchSheet.addRow(rowData);
+        dataRow.height = 20;
+
+        for (let colIdx = 1; colIdx <= mismatchHeaders.length; colIdx++) {
+          const cell = mismatchSheet.getCell(dataRow.number, colIdx);
+          cell.font = { name: 'Arial', size: 10 };
+          cell.border = borderStyle;
+          const cellVal = String(cell.value || '');
+          if (/^-?\d+$/.test(cellVal)) {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.value = Number(cellVal);
+          } else {
+            cell.alignment = { horizontal: 'left', vertical: 'middle' };
+          }
+        }
+      });
+
+      // Auto fit columns
+      mismatchSheet.columns.forEach(column => {
         let maxLen = 0;
         column.eachCell({ includeEmpty: true }, cell => {
           const val = String(cell.value || '');

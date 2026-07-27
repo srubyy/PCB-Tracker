@@ -30,7 +30,10 @@ export const tables = {
   pending_production_logs: [],
   cell_edits: [],
   scan_logs: [],
-  export_history: []
+  export_history: [],
+  checkpoint_scans: [],
+  checkpoint_results: [],
+  missing_pcbs: []
 };
 
 // --- Seed Parsing Helpers ---

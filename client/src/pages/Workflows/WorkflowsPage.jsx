@@ -4,6 +4,7 @@ import { Cpu, Wrench, ArrowRight, Check, CheckCheck, X, ShieldAlert, CheckCircle
 import StationChecklist from '../../features/workflows/StationChecklist';import PresetRemarksSelect from '../../features/workflows/PresetRemarksSelect';
 import PipelineIndicator, { STEP_NAMES } from '../../features/stages/PipelineIndicator';
 import InwardMappingImportSection from '../../features/workflows/InwardMappingImportSection';
+import AuditTerminal from '../../features/workflows/AuditTerminal';
 
 const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast }) => {
   const { user, apiFetch } = useAuth();
@@ -23,6 +24,11 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   const [rejectionLogInputId, setRejectionLogInputId] = useState(null);
   const [rejectionLogText, setRejectionLogText] = useState('');
   const [inwardTab, setInwardTab] = useState('summary');
+  
+  const [step6Results, setStep6Results] = useState(null);
+  const [step10Results, setStep10Results] = useState(null);
+  const [reportModalData, setReportModalData] = useState(null);
+  const [activeReportTab, setActiveReportTab] = useState('missing');
 
   // Load user-specific states when user loads
   useEffect(() => {
@@ -198,6 +204,48 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     }
   };
 
+  const fetchCheckpointResults = async (lotId = productionLotId) => {
+    if (!lotId) {
+      setStep6Results(null);
+      setStep10Results(null);
+      return;
+    }
+    try {
+      const res6 = await apiFetch(`/api/audit/report/${lotId}/6`);
+      if (res6.ok) {
+        const data6 = await res6.json();
+        setStep6Results(data6.results || null);
+      }
+      const res10 = await apiFetch(`/api/audit/report/${lotId}/10`);
+      if (res10.ok) {
+        const data10 = await res10.json();
+        setStep10Results(data10.results || null);
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleOpenReport = async (step) => {
+    if (!productionLotId) return;
+    try {
+      const res = await apiFetch(`/api/audit/report/${productionLotId}/${step}`);
+      if (res.ok) {
+        const data = await res.json();
+        setReportModalData({
+          ...data,
+          step
+        });
+        setActiveReportTab('missing');
+      } else {
+        showToast('Failed to retrieve checkpoint report.', 'error');
+      }
+    } catch (err) {
+      console.error(err);
+      showToast('Failed to load checkpoint report.', 'error');
+    }
+  };
+
   useEffect(() => {
     fetchEngineers();
     fetchStock();
@@ -223,8 +271,11 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
       fetchProductionLogs(productionLotId, selectedProductionStep);
       if (productionLotId) {
         fetchLotProductionStats(productionLotId);
+        fetchCheckpointResults(productionLotId);
       } else {
         setLotProductionStats(null);
+        setStep6Results(null);
+        setStep10Results(null);
       }
     }
   }, [user, selectedProductionStep, productionLotId]);
@@ -407,6 +458,66 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
         />
       </div>
 
+      {/* Checkpoint Audit Banners */}
+      {(step6Results || step10Results) && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 20 }}>
+          {step6Results && (
+            <div className="glass-panel" style={{
+              padding: '12px 18px',
+              borderLeft: '4px solid #10b981',
+              background: 'rgba(16, 185, 129, 0.02)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderRadius: 8
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <CheckCircle size={16} color="#10b981" />
+                <span style={{ fontSize: '0.82rem', color: '#fff', fontWeight: 600 }}>
+                  Step 6 checkpoint: ✓ Completed — {step6Results.total_scanned} of {step6Results.total_in_scope} scanned — {step6Results.total_missing} missing
+                </span>
+              </div>
+              {['Superadmin', 'Team Lead'].includes(user?.role) && (
+                <button
+                  onClick={() => handleOpenReport(6)}
+                  className="btn btn-secondary"
+                  style={{ width: 'auto', margin: 0, padding: '4px 10px', fontSize: '0.7rem', fontWeight: 700 }}
+                >
+                  View Detailed Report
+                </button>
+              )}
+            </div>
+          )}
+          {step10Results && (
+            <div className="glass-panel" style={{
+              padding: '12px 18px',
+              borderLeft: '4px solid #10b981',
+              background: 'rgba(16, 185, 129, 0.02)',
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              borderRadius: 8
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <CheckCircle size={16} color="#10b981" />
+                <span style={{ fontSize: '0.82rem', color: '#fff', fontWeight: 600 }}>
+                  Step 10 checkpoint: ✓ Completed — {step10Results.total_scanned} of {step10Results.total_in_scope} scanned — {step10Results.total_missing} missing
+                </span>
+              </div>
+              {['Superadmin', 'Team Lead'].includes(user?.role) && (
+                <button
+                  onClick={() => handleOpenReport(10)}
+                  className="btn btn-secondary"
+                  style={{ width: 'auto', margin: 0, padding: '4px 10px', fontSize: '0.7rem', fontWeight: 700 }}
+                >
+                  View Detailed Report
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+
       <div className={user?.role === 'Employee' ? "" : "widescreen-grid"}>
         {/* Left Column: Lot Status & ESD checklist (Only visible to non-Employees) */}
         {user?.role !== 'Employee' && (
@@ -535,7 +646,19 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
 
         {/* Right Column: Vetting Queue / Logs form */}
         <div className="glass-panel" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 16, marginBottom: 24 }}>
-          {user?.role === 'Employee' ? (
+          {[6, 10].includes(selectedProductionStep) ? (
+            <AuditTerminal
+              lotId={productionLotId}
+              stepNo={selectedProductionStep}
+              user={user}
+              showToast={showToast}
+              onComplete={() => {
+                fetchCheckpointResults(productionLotId);
+                fetchLotProductionStats(productionLotId);
+              }}
+              apiFetch={apiFetch}
+            />
+          ) : user?.role === 'Employee' ? (
             <div>
               <h2 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-primary)', borderBottom: '1px solid var(--card-border)', paddingBottom: 8, marginBottom: 16 }}>
                 Log Production Batch - Step {selectedProductionStep}: {steps[selectedProductionStep - 1]?.name || 'Unknown Step'}
@@ -1273,6 +1396,183 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                   );
                 }
               })()}
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* Checkpoint Audit Detailed Report Modal */}
+      {reportModalData && (
+        <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(11, 15, 25, 0.9)', backdropFilter: 'blur(10px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999, padding: 16 }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: 1000, maxHeight: '90vh', display: 'flex', flexDirection: 'column', padding: 24, borderColor: 'var(--color-primary)', background: '#0b0f19', borderRadius: 16 }}>
+            
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--card-border)', paddingBottom: 16, marginBottom: 16 }}>
+              <div>
+                <span className="app-subtitle" style={{ fontSize: '0.65rem' }}>Checkpoint Audit Center</span>
+                <h3 style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--text-main)', marginTop: 2 }}>
+                  Step {reportModalData.step} Audit Checkpoint Detailed Report
+                </h3>
+              </div>
+              <button
+                onClick={() => setReportModalData(null)}
+                style={{ background: 'rgba(239, 68, 68, 0.1)', border: 'none', borderRadius: '50%', color: '#ef4444', width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer' }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Stats Summary Widgets */}
+            {reportModalData.results && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12, marginBottom: 16 }}>
+                <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--card-border)', borderRadius: 10 }}>
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block' }}>Expected in steps</span>
+                  <strong style={{ fontSize: '1.1rem', color: '#fff' }}>{reportModalData.results.total_in_scope} PCBs</strong>
+                </div>
+                <div style={{ padding: 12, background: 'rgba(255,255,255,0.02)', border: '1px solid var(--card-border)', borderRadius: 10 }}>
+                  <span style={{ fontSize: '0.6rem', color: 'var(--text-muted)', textTransform: 'uppercase', display: 'block' }}>Physically Scanned</span>
+                  <strong style={{ fontSize: '1.1rem', color: 'var(--color-primary)' }}>{reportModalData.results.total_scanned} PCBs</strong>
+                </div>
+                <div style={{ padding: 12, background: 'rgba(239, 68, 68, 0.05)', border: '1px solid rgba(239, 68, 68, 0.2)', borderRadius: 10 }}>
+                  <span style={{ fontSize: '0.6rem', color: '#ef4444', textTransform: 'uppercase', display: 'block' }}>Missing</span>
+                  <strong style={{ fontSize: '1.1rem', color: '#f87171' }}>{reportModalData.results.total_missing} PCBs</strong>
+                </div>
+                <div style={{ padding: 12, background: 'rgba(245, 158, 11, 0.05)', border: '1px solid rgba(245, 158, 11, 0.2)', borderRadius: 10 }}>
+                  <span style={{ fontSize: '0.6rem', color: '#f59e0b', textTransform: 'uppercase', display: 'block' }}>Never Touched</span>
+                  <strong style={{ fontSize: '1.1rem', color: '#fbbf24' }}>{reportModalData.results.total_never_touched} PCBs</strong>
+                </div>
+              </div>
+            )}
+
+            {/* Tab Selection */}
+            <div style={{ display: 'flex', gap: 12, borderBottom: '1px solid var(--card-border)', marginBottom: 16 }}>
+              <button
+                onClick={() => setActiveReportTab('missing')}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: activeReportTab === 'missing' ? '2px solid var(--color-primary)' : 'none',
+                  color: activeReportTab === 'missing' ? 'var(--color-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                🔴 Missing PCBs ({reportModalData.missing.length})
+              </button>
+              <button
+                onClick={() => setActiveReportTab('mismatches')}
+                style={{
+                  padding: '8px 16px',
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
+                  background: 'transparent',
+                  border: 'none',
+                  borderBottom: activeReportTab === 'mismatches' ? '2px solid var(--color-primary)' : 'none',
+                  color: activeReportTab === 'mismatches' ? 'var(--color-primary)' : 'var(--text-muted)',
+                  cursor: 'pointer'
+                }}
+              >
+                ⚠️ Count Mismatch ({reportModalData.mismatches.length})
+              </button>
+            </div>
+
+            {/* Tab Content */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {activeReportTab === 'missing' ? (
+                reportModalData.missing.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+                    No missing PCBs recorded at this checkpoint.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--card-border)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: 10 }}>PCB Sr No</th>
+                        <th style={{ padding: 10 }}>Actual Serial No</th>
+                        <th style={{ padding: 10 }}>Part Code</th>
+                        <th style={{ padding: 10 }}>Model</th>
+                        <th style={{ padding: 10 }}>Mfg Year</th>
+                        <th style={{ padding: 10 }}>Action</th>
+                        <th style={{ padding: 10 }}>Last Step Logged</th>
+                        <th style={{ padding: 10 }}>Logged By</th>
+                        <th style={{ padding: 10 }}>Last Logged At</th>
+                        <th style={{ padding: 10 }}>Missing Type</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportModalData.missing.map((m, idx) => {
+                        const isNeverTouched = m.missing_type === 'Never touched';
+                        const rowBg = isNeverTouched ? 'rgba(239, 68, 68, 0.06)' : 'rgba(245, 158, 11, 0.06)';
+                        const rowBorder = isNeverTouched ? 'rgba(239, 68, 68, 0.15)' : 'rgba(245, 158, 11, 0.15)';
+                        const txtColor = isNeverTouched ? '#f87171' : '#fbbf24';
+
+                        return (
+                          <tr key={m.id || idx} style={{ borderBottom: `1px solid ${rowBorder}`, background: rowBg, color: txtColor }}>
+                            <td style={{ padding: 10, fontWeight: 700 }}>{m.pcb_sr_no || '-'}</td>
+                            <td style={{ padding: 10, fontFamily: 'monospace' }}>{m.barcode || '-'}</td>
+                            <td style={{ padding: 10 }}>{m.part_code || '-'}</td>
+                            <td style={{ padding: 10 }}>{m.model || '-'}</td>
+                            <td style={{ padding: 10 }}>{m.mfg_year || '-'}</td>
+                            <td style={{ padding: 10 }}>{m.action || '-'}</td>
+                            <td style={{ padding: 10 }}>{m.last_step_name || 'N/A'}</td>
+                            <td style={{ padding: 10 }}>{m.last_logged_by_name || 'N/A'}</td>
+                            <td style={{ padding: 10 }}>{m.last_logged_at ? new Date(m.last_logged_at).toLocaleString() : 'N/A'}</td>
+                            <td style={{ padding: 10 }}>
+                              <span style={{ fontSize: '0.62rem', background: isNeverTouched ? 'rgba(239, 68, 68, 0.2)' : 'rgba(245, 158, 11, 0.2)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                                {m.missing_type}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )
+              ) : (
+                reportModalData.mismatches.length === 0 ? (
+                  <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>
+                    No part code count mismatches recorded at this checkpoint.
+                  </div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.75rem', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid var(--card-border)', color: 'var(--text-muted)' }}>
+                        <th style={{ padding: 10 }}>Part Code</th>
+                        <th style={{ padding: 10 }}>Expected at Checkpoint</th>
+                        <th style={{ padding: 10 }}>Scanned at Checkpoint</th>
+                        <th style={{ padding: 10 }}>Delta</th>
+                        <th style={{ padding: 10 }}>First Step where Count Dropped</th>
+                        <th style={{ padding: 10 }}>Step-by-step breakdown</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {reportModalData.mismatches.map((m, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid var(--card-border)', color: '#fff' }}>
+                          <td style={{ padding: 10, fontWeight: 700, color: 'var(--color-primary)' }}>{m.part_code}</td>
+                          <td style={{ padding: 10 }}>{m.expected} units</td>
+                          <td style={{ padding: 10 }}>{m.scanned} units</td>
+                          <td style={{ padding: 10, color: m.delta > 0 ? '#ef4444' : '#10b981', fontWeight: 700 }}>
+                            {m.delta > 0 ? `-${m.delta}` : `+${Math.abs(m.delta)}`}
+                          </td>
+                          <td style={{ padding: 10, color: '#fbbf24', fontWeight: 700 }}>{m.first_step_dropped}</td>
+                          <td style={{ padding: 10 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              {m.steps_breakdown.map((sb, sIdx) => (
+                                <div key={sIdx} style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>
+                                  <strong>{sb.step_name}:</strong> {sb.count} units logged by [{sb.logged_by}]
+                                </div>
+                              ))}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )
+              )}
             </div>
 
           </div>

@@ -7,6 +7,7 @@ import panelRoutes from './panelRoutes.js';
 import approvalRoutes from './approvalRoutes.js';
 import productionRoutes from './productionRoutes.js';
 import userRoutes from './userRoutes.js';
+import auditRoutes from './auditRoutes.js';
 
 const router = express.Router();
 
@@ -18,5 +19,6 @@ router.use('/', panelRoutes);
 router.use('/', approvalRoutes);
 router.use('/', productionRoutes);
 router.use('/', userRoutes);
+router.use('/', auditRoutes);
 
 export default router;
