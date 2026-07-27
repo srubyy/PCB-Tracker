@@ -15,7 +15,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   // Terminal selection states
   const [selectedProductionStep, setSelectedProductionStep] = useState(1);
   const [productionLotId, setProductionLotId] = useState('');
-  const [productionPcbType, setProductionPcbType] = useState('GV3 Digital PCB');
+  const [productionPcbType, setProductionPcbType] = useState('SA0019 - PCB GV2_CFEfficio');
   const [stepInputs, setStepInputs] = useState({});
   const [pendingProductionLogs, setPendingProductionLogs] = useState([]);
   const [approvedProductionLogs, setApprovedProductionLogs] = useState([]);
@@ -507,12 +507,16 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                   onChange={e => setProductionPcbType(e.target.value)}
                   style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
                 >
-                  <option value="GV3 Digital PCB">GV3 Digital PCB</option>
-                  <option value="GV2 Remote Main PCB">GV2 Remote Main PCB</option>
-                  <option value="GV4 Studio+ Remote PCB">GV4 Studio+ Remote PCB</option>
-                  <option value="GV3 Power PCB">GV3 Power PCB</option>
-                  <option value="GV4 Alpha Regulator PCB">GV4 Alpha Regulator PCB</option>
-                  <option value="GV2 Regulator">GV2 Regulator</option>
+                  <option value="SA0019 - PCB GV2_CFEfficio">SA0019 - PCB GV2_CFEfficio</option>
+                  <option value="SA0021 - GV2  Main PCB 1200mm Reg_28W">SA0021 - GV2  Main PCB 1200mm Reg_28W</option>
+                  <option value="SA0022 - GV2 Main PCB 1400mm Reg 35W">SA0022 - GV2 Main PCB 1400mm Reg 35W</option>
+                  <option value="SA0011 - PCB GV3 Digital Renesat">SA0011 - PCB GV3 Digital Renesat</option>
+                  <option value="SA0010 - GV3 Smart Digital 1200mm">SA0010 - GV3 Smart Digital 1200mm</option>
+                  <option value="SA0061 - GV3 Power PCB White">SA0061 - GV3 Power PCB White</option>
+                  <option value="SA0060 - GV3 Power PCB Black">SA0060 - GV3 Power PCB Black</option>
+                  <option value="SA0039 - GV4 Studio+ Remote_ 1200mm">SA0039 - GV4 Studio+ Remote_ 1200mm</option>
+                  <option value="SA0038 - GV4 Alpha PCB_Regulator_1200mm">SA0038 - GV4 Alpha PCB_Regulator_1200mm</option>
+                  <option value="SA0087 - GV4 Ozeo PCB_Main_1200mm">SA0087 - GV4 Ozeo PCB_Main_1200mm</option>
                 </select>
               </div>
 
@@ -545,12 +549,16 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                     onChange={e => setProductionPcbType(e.target.value)}
                     style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
                   >
-                    <option value="GV3 Digital PCB">GV3 Digital PCB</option>
-                    <option value="GV2 Remote Main PCB">GV2 Remote Main PCB</option>
-                    <option value="GV4 Studio+ Remote PCB">GV4 Studio+ Remote PCB</option>
-                    <option value="GV3 Power PCB">GV3 Power PCB</option>
-                    <option value="GV4 Alpha Regulator PCB">GV4 Alpha Regulator PCB</option>
-                    <option value="GV2 Regulator">GV2 Regulator</option>
+                    <option value="SA0019 - PCB GV2_CFEfficio">SA0019 - PCB GV2_CFEfficio</option>
+                    <option value="SA0021 - GV2  Main PCB 1200mm Reg_28W">SA0021 - GV2  Main PCB 1200mm Reg_28W</option>
+                    <option value="SA0022 - GV2 Main PCB 1400mm Reg 35W">SA0022 - GV2 Main PCB 1400mm Reg 35W</option>
+                    <option value="SA0011 - PCB GV3 Digital Renesat">SA0011 - PCB GV3 Digital Renesat</option>
+                    <option value="SA0010 - GV3 Smart Digital 1200mm">SA0010 - GV3 Smart Digital 1200mm</option>
+                    <option value="SA0061 - GV3 Power PCB White">SA0061 - GV3 Power PCB White</option>
+                    <option value="SA0060 - GV3 Power PCB Black">SA0060 - GV3 Power PCB Black</option>
+                    <option value="SA0039 - GV4 Studio+ Remote_ 1200mm">SA0039 - GV4 Studio+ Remote_ 1200mm</option>
+                    <option value="SA0038 - GV4 Alpha PCB_Regulator_1200mm">SA0038 - GV4 Alpha PCB_Regulator_1200mm</option>
+                    <option value="SA0087 - GV4 Ozeo PCB_Main_1200mm">SA0087 - GV4 Ozeo PCB_Main_1200mm</option>
                   </select>
                 </div>
                 {selectedProductionStep === 1 && (
