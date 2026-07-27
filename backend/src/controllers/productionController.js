@@ -41,6 +41,73 @@ const getStepSum = async (lotId, stepNo, fields, includePending = true) => {
   return result;
 };
 
+const getStepSumForPcbType = async (lotId, stepNo, pcbType, fields, includePending = true) => {
+  if (isFallback()) {
+    const comLogs = memoryDb.tables.production_logs.filter(l => l.lot_id === lotId && l.step_no === stepNo && l.pcb_type === pcbType);
+    const penLogs = includePending
+      ? memoryDb.tables.pending_production_logs.filter(l => l.lot_id === lotId && l.step_no === stepNo && l.pcb_type === pcbType && !['Approved', 'Rejected'].includes(l.approval_status))
+      : [];
+
+    const result = {};
+    fields.forEach(f => {
+      let sum = 0;
+      comLogs.forEach(l => {
+        sum += parseInt(l.step_data[f] || 0);
+      });
+      penLogs.forEach(l => {
+        sum += parseInt(l.step_data[f] || 0);
+      });
+      result[f] = sum;
+    });
+    return result;
+  }
+
+  const selectCommitted = fields.map(f => `COALESCE(SUM((step_data->>'${f}')::integer), 0) AS ${f}`).join(', ');
+  const comRes = await query(`SELECT ${selectCommitted} FROM production_logs WHERE lot_id = $1 AND step_no = $2 AND pcb_type = $3`, [lotId, stepNo, pcbType]);
+
+  let penRes = { rows: [{}] };
+  if (includePending) {
+    const selectPending = fields.map(f => `COALESCE(SUM((step_data->>'${f}')::integer), 0) AS ${f}`).join(', ');
+    penRes = await query(`SELECT ${selectPending} FROM pending_production_logs WHERE lot_id = $1 AND step_no = $2 AND pcb_type = $3 AND approval_status NOT IN ('Approved', 'Rejected')`, [lotId, stepNo, pcbType]);
+  }
+
+  const result = {};
+  fields.forEach(f => {
+    result[f] = parseInt(comRes.rows[0][f] || 0) + parseInt(penRes.rows[0]?.[f] || 0);
+  });
+  return result;
+};
+
+const getPartCodeLimit = async (lotId, limitType, partCode) => {
+  if (isFallback()) {
+    if (limitType === 'inward') {
+      return (memoryDb.tables.panels || []).filter(p => p.lot_id === lotId && p.part_code === partCode).length;
+    } else if (limitType === 'step6') {
+      return (memoryDb.tables.checkpoint_scans || []).filter(
+        cs => cs.lot_id === lotId && 
+              cs.checkpoint_step === 6 && 
+              !cs.is_unknown && 
+              (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
+      ).length;
+    }
+    return 0;
+  }
+
+  if (limitType === 'inward') {
+    const res = await pool.query('SELECT COUNT(*)::integer FROM panels WHERE lot_id = $1 AND part_code = $2', [lotId, partCode]);
+    return res.rows[0].count;
+  } else if (limitType === 'step6') {
+    const res = await pool.query(`
+      SELECT COUNT(*)::integer 
+      FROM checkpoint_scans cs 
+      JOIN panels p ON cs.panel_id = p.id 
+      WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND p.part_code = $2 AND cs.is_unknown = FALSE
+    `, [lotId, partCode]);
+    return res.rows[0].count;
+  }
+  return 0;
+};
+
 export const getProductionLogs = async (req, res) => {
   const { lot_id, step_no } = req.query;
 
@@ -165,78 +232,78 @@ export const logProduction = async (req, res) => {
     const received_qty = lot.received_qty;
 
     // Checksums Validation
+    const partCode = pcb_type.split(' - ')[0].trim();
     if (stepNo === 2) {
       const { repairable_qty, scrap_qty } = step_data;
-      const existing = await getStepSum(lotId, 2, ['repairable_qty', 'scrap_qty']);
+      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
+      const existing = await getStepSumForPcbType(lotId, 2, pcb_type, ['repairable_qty', 'scrap_qty']);
       const total = existing.repairable_qty + existing.scrap_qty + parseInt(repairable_qty || 0) + parseInt(scrap_qty || 0);
-      if (total > received_qty) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total segregated PCBs (${total}) would exceed the actual received quantity (${received_qty}) of Lot ${lot.lot_no}.` });
+      if (total > inwardLimit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total segregated PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 3) {
       const { code_ok, code_not_ok } = step_data;
-      const step2 = await getStepSum(lotId, 2, ['repairable_qty']);
-      const existing = await getStepSum(lotId, 3, ['code_ok', 'code_not_ok']);
+      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
+      const existing = await getStepSumForPcbType(lotId, 3, pcb_type, ['code_ok', 'code_not_ok']);
       const total = existing.code_ok + existing.code_not_ok + parseInt(code_ok || 0) + parseInt(code_not_ok || 0);
-      if (total > step2.repairable_qty) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total programmed PCBs (${total}) would exceed the segregated repairable quantity (${step2.repairable_qty}) of Lot ${lot.lot_no}.` });
+      if (total > inwardLimit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total programmed PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 4) {
       const { qty_passed, qty_failed } = step_data;
-      const step3 = await getStepSum(lotId, 3, ['code_ok']);
-      const existing = await getStepSum(lotId, 4, ['qty_passed', 'qty_failed']);
+      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
+      const existing = await getStepSumForPcbType(lotId, 4, pcb_type, ['qty_passed', 'qty_failed']);
       const total = existing.qty_passed + existing.qty_failed + parseInt(qty_passed || 0) + parseInt(qty_failed || 0);
-      if (total > step3.code_ok) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total tested PCBs (${total}) would exceed the programmed OK quantity (${step3.code_ok}) of Lot ${lot.lot_no}.` });
+      if (total > inwardLimit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total tested PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 5) {
       const { debug_ok, critical_qty, scrap_qty } = step_data;
-      const step4 = await getStepSum(lotId, 4, ['qty_failed']);
-      const existing = await getStepSum(lotId, 5, ['debug_ok', 'critical_qty', 'scrap_qty']);
+      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
+      const existing = await getStepSumForPcbType(lotId, 5, pcb_type, ['debug_ok', 'critical_qty', 'scrap_qty']);
       const total = existing.debug_ok + existing.critical_qty + existing.scrap_qty + parseInt(debug_ok || 0) + parseInt(critical_qty || 0) + parseInt(scrap_qty || 0);
-      if (total > step4.qty_failed) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total debugged PCBs (${total}) would exceed the failed quantity from 1st Testing (${step4.qty_failed}) of Lot ${lot.lot_no}.` });
+      if (total > inwardLimit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total debugged PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 6) {
       const { entry_count } = step_data;
-      const step4 = await getStepSum(lotId, 4, ['qty_passed']);
-      const step5 = await getStepSum(lotId, 5, ['debug_ok']);
-      const limit = step4.qty_passed + step5.debug_ok;
-      const existing = await getStepSum(lotId, 6, ['entry_count']);
+      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
+      const existing = await getStepSumForPcbType(lotId, 6, pcb_type, ['entry_count']);
       const total = existing.entry_count + parseInt(entry_count || 0);
-      if (total > limit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total entered PCBs (${total}) would exceed the passed/debugged count (${limit}) of Lot ${lot.lot_no}.` });
+      if (total > inwardLimit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total entry count of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 7) {
       const { qty_cleaned, qc_reject } = step_data;
-      const step6 = await getStepSum(lotId, 6, ['entry_count']);
-      const existing = await getStepSum(lotId, 7, ['qty_cleaned', 'qc_reject']);
+      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
+      const existing = await getStepSumForPcbType(lotId, 7, pcb_type, ['qty_cleaned', 'qc_reject']);
       const total = existing.qty_cleaned + existing.qc_reject + parseInt(qty_cleaned || 0) + parseInt(qc_reject || 0);
-      if (total > step6.entry_count) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total cleaned PCBs (${total}) would exceed the entry count (${step6.entry_count}) of Lot ${lot.lot_no}.` });
+      if (total > step6Limit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total cleaned PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 8) {
       const { qty_passed, qty_failed } = step_data;
-      const step7 = await getStepSum(lotId, 7, ['qty_cleaned']);
-      const existing = await getStepSum(lotId, 8, ['qty_passed', 'qty_failed']);
+      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
+      const existing = await getStepSumForPcbType(lotId, 8, pcb_type, ['qty_passed', 'qty_failed']);
       const total = existing.qty_passed + existing.qty_failed + parseInt(qty_passed || 0) + parseInt(qty_failed || 0);
-      if (total > step7.qty_cleaned) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total QC-inspected PCBs (${total}) would exceed the cleaned count (${step7.qty_cleaned}) of Lot ${lot.lot_no}.` });
+      if (total > step6Limit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total QC-inspected PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 9) {
       const { qty_coated } = step_data;
-      const step8 = await getStepSum(lotId, 8, ['qty_passed']);
-      const existing = await getStepSum(lotId, 9, ['qty_coated']);
+      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
+      const existing = await getStepSumForPcbType(lotId, 9, pcb_type, ['qty_coated']);
       const total = existing.qty_coated + parseInt(qty_coated || 0);
-      if (total > step8.qty_passed) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total coated PCBs (${total}) would exceed the QC-passed count (${step8.qty_passed}) of Lot ${lot.lot_no}.` });
+      if (total > step6Limit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total coated PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 10) {
       const { qty_passed, qty_failed } = step_data;
-      const step9 = await getStepSum(lotId, 9, ['qty_coated']);
-      const existing = await getStepSum(lotId, 10, ['qty_passed', 'qty_failed']);
+      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
+      const existing = await getStepSumForPcbType(lotId, 10, pcb_type, ['qty_passed', 'qty_failed']);
       const total = existing.qty_passed + existing.qty_failed + parseInt(qty_passed || 0) + parseInt(qty_failed || 0);
-      if (total > step9.qty_coated) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total final-tested PCBs (${total}) would exceed the coated count (${step9.qty_coated}) of Lot ${lot.lot_no}.` });
+      if (total > step6Limit) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total final-tested PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
       }
     } else if (stepNo === 11) {
       const { bubble_packed, box_packed } = step_data;

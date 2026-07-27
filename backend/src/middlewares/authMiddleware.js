@@ -10,6 +10,9 @@ export const authenticateJWT = (req, res, next) => {
       if (err) {
         return res.status(401).json({ error: "Access token is invalid or expired." });
       }
+      if (user && (user.role === 'Superadmin' || user.role === 'Manager')) {
+        user.role = 'Team Lead';
+      }
       req.user = user;
       next();
     });
@@ -20,7 +23,11 @@ export const authenticateJWT = (req, res, next) => {
 
 export const authorize = (allowedRoles) => {
   return (req, res, next) => {
-    if (!req.user || !allowedRoles.includes(req.user.role)) {
+    let userRole = req.user?.role;
+    if (userRole === 'Superadmin' || userRole === 'Manager') {
+      userRole = 'Team Lead';
+    }
+    if (!req.user || !allowedRoles.includes(userRole)) {
       return res.status(403).json({ error: "Access denied. Insufficient permissions." });
     }
     next();
