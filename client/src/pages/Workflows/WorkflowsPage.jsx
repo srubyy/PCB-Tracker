@@ -370,16 +370,16 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                 }
               }
             }}
-            disabled={!selectedCompany}
+            disabled={false}
             style={{
               width: 'auto',
               minWidth: 200,
               padding: '6px 12px',
-              background: !selectedCompany ? 'rgba(255,255,255,0.02)' : 'var(--input-bg)',
-              color: !selectedCompany ? 'var(--text-muted)' : 'var(--text-main)',
+              background: 'var(--input-bg)',
+              color: 'var(--text-main)',
               borderRadius: 8,
               border: '1px solid var(--card-border)',
-              cursor: !selectedCompany ? 'not-allowed' : 'pointer'
+              cursor: 'pointer'
             }}
           >
              <option value="">-- Select Active Lot --</option>
