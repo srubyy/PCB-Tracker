@@ -183,32 +183,56 @@ const getStep10AuditLimit = async (lotId, partCode) => {
 
 export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
   const cleanPartCode = partCode.split(' - ')[0].trim();
+  const cleanLotId = parseInt(lotId, 10);
 
   if (stepNo === 2) {
     if (isFallback()) {
-      return memoryDb.tables.panels.filter(p => p.lot_id === lotId && p.part_code === cleanPartCode).length;
+      return memoryDb.tables.panels.filter(p => p.lot_id === cleanLotId && p.part_code === cleanPartCode).length;
     } else {
-      const res = await pool.query('SELECT COUNT(*)::integer FROM panels WHERE lot_id = $1 AND part_code = $2', [lotId, cleanPartCode]);
+      const res = await pool.query('SELECT COUNT(*)::integer FROM panels WHERE lot_id = $1 AND part_code = $2', [cleanLotId, cleanPartCode]);
       return res.rows[0].count;
     }
   }
 
   if (stepNo === 3) {
     if (isFallback()) {
-      const lot = memoryDb.tables.lots.find(l => l.id === lotId);
+      const lot = memoryDb.tables.lots.find(l => l.id === cleanLotId);
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+
+      console.log('DEBUG getPartCodeStepCap (Fallback):', {
+        lotId,
+        cleanLotId,
+        stepNo,
+        partCode,
+        cleanPartCode,
+        scrapYear,
+        sepYear
+      });
+
       const panels = memoryDb.tables.panels.filter(p => 
-        p.lot_id === lotId && 
+        p.lot_id === cleanLotId && 
         p.part_code === cleanPartCode &&
         (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear))
       );
+
+      console.log('DEBUG cap result (Fallback):', panels.length);
       return panels.length;
     } else {
-      const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+      const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [cleanLotId]);
       const lot = lotRes.rows[0];
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+
+      console.log('DEBUG getPartCodeStepCap:', {
+        lotId,
+        cleanLotId,
+        stepNo,
+        partCode,
+        cleanPartCode,
+        scrapYear,
+        sepYear
+      });
 
       const res = await pool.query(`
         SELECT COUNT(*)::integer 
@@ -216,45 +240,47 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         WHERE lot_id = $1 
           AND part_code = $2 
           AND (mfg_year IS NULL OR (mfg_year > $3 AND mfg_year <> $4))
-      `, [lotId, cleanPartCode, scrapYear, sepYear]);
+      `, [cleanLotId, cleanPartCode, scrapYear, sepYear]);
+
+      console.log('DEBUG cap result:', res.rows[0].count);
       return res.rows[0].count;
     }
   }
 
   if (stepNo === 4) {
-    return getStepOkSum(lotId, 3, cleanPartCode, 'code_ok');
+    return getStepOkSum(cleanLotId, 3, cleanPartCode, 'code_ok');
   }
 
   if (stepNo === 5) {
-    return getStepOkSum(lotId, 4, cleanPartCode, 'qty_passed');
+    return getStepOkSum(cleanLotId, 4, cleanPartCode, 'qty_passed');
   }
 
   if (stepNo === 6) {
-    return getStepOkSum(lotId, 5, cleanPartCode, 'debug_ok');
+    return getStepOkSum(cleanLotId, 5, cleanPartCode, 'debug_ok');
   }
 
   if (stepNo === 7) {
-    return getStep6AuditLimit(lotId, cleanPartCode);
+    return getStep6AuditLimit(cleanLotId, cleanPartCode);
   }
 
   if (stepNo === 8) {
-    return getStepOkSum(lotId, 7, cleanPartCode, 'qty_cleaned');
+    return getStepOkSum(cleanLotId, 7, cleanPartCode, 'qty_cleaned');
   }
 
   if (stepNo === 9) {
-    return getStepOkSum(lotId, 8, cleanPartCode, 'qty_passed');
+    return getStepOkSum(cleanLotId, 8, cleanPartCode, 'qty_passed');
   }
 
   if (stepNo === 10) {
-    return getStepOkSum(lotId, 9, cleanPartCode, 'qty_coated');
+    return getStepOkSum(cleanLotId, 9, cleanPartCode, 'qty_coated');
   }
 
   if (stepNo === 11) {
-    return getStep10AuditLimit(lotId, cleanPartCode);
+    return getStep10AuditLimit(cleanLotId, cleanPartCode);
   }
 
   if (stepNo === 12) {
-    return getStepOkSum(lotId, 11, cleanPartCode, 'bubble_packed');
+    return getStepOkSum(cleanLotId, 11, cleanPartCode, 'bubble_packed');
   }
 
   return 999999;
