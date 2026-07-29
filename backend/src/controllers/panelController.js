@@ -1481,6 +1481,54 @@ export const exportExcel = async (req, res) => {
     }
 
     if (!rawSheets) {
+      // Fallback: Reconstruct rawSheets from panels in database!
+      let allPanels = [];
+      if (isFallback()) {
+        allPanels = memoryDb.tables.panels.filter(p => p.lot_id === lotId);
+      } else {
+        const panelsRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1 ORDER BY sr_no ASC', [lotId]);
+        allPanels = panelsRes.rows;
+      }
+
+      if (allPanels.length > 0) {
+        const sheetName = allPanels[0].sheet_name || 'Sheet1';
+        const header = ["PCB Sr No", "Barcode", "Part Code", "Model", "Box No", "Mfg Year", "Status", "Scrap Reason"];
+        const rows = [header];
+        
+        allPanels.forEach(p => {
+          if (p.excel_data) {
+            let maxColIdx = 0;
+            const eData = typeof p.excel_data === 'string' ? JSON.parse(p.excel_data) : p.excel_data;
+            Object.keys(eData).forEach(k => {
+              const match = k.match(/Col_(\d+)/);
+              if (match) {
+                const idx = parseInt(match[1], 10);
+                if (idx > maxColIdx) maxColIdx = idx;
+              }
+            });
+            const r = [];
+            for (let c = 0; c <= maxColIdx; c++) {
+              r.push(eData[`Col_${c}`] !== undefined ? String(eData[`Col_${c}`]) : '');
+            }
+            rows.push(r);
+          } else {
+            rows.push([
+              p.dummy_sr_no || '',
+              p.barcode || '',
+              p.part_code || '',
+              p.model || '',
+              p.box_no || '',
+              p.mfg_year ? String(p.mfg_year) : '',
+              p.status || '',
+              p.scrap_reason || ''
+            ]);
+          }
+        });
+        rawSheets = { [sheetName]: rows };
+      }
+    }
+
+    if (!rawSheets) {
       return res.status(400).json({ error: "No spreadsheet uploaded for this lot yet." });
     }
 
