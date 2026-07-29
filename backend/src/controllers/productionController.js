@@ -789,9 +789,20 @@ export const getLotProductionStats = async (req, res) => {
     let baselines = [];
     if (isFallback()) {
       baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId);
+      if (baselines.length === 0) {
+        const { initializeLotBaselines } = await import('./panelController.js');
+        await initializeLotBaselines(lotId);
+        baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId);
+      }
     } else {
       const baseRes = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1', [lotId]);
       baselines = baseRes.rows;
+      if (baselines.length === 0) {
+        const { initializeLotBaselines } = await import('./panelController.js');
+        await initializeLotBaselines(lotId);
+        const refetched = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1', [lotId]);
+        baselines = refetched.rows;
+      }
     }
     stats.part_code_baselines = baselines;
 
