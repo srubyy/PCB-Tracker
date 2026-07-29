@@ -11,7 +11,14 @@ const startServer = async () => {
   // Test connection to local Postgres
   const dbConnected = await testDbConnection();
   
-  if (!dbConnected || isFallback()) {
+  if (dbConnected && !isFallback()) {
+    try {
+      const { runMigrations } = await import('./src/config/migrateRunner.js');
+      await runMigrations();
+    } catch (migErr) {
+      console.error('Failed to run migrations on startup:', migErr);
+    }
+  } else {
     // If PG is unreachable, seed the memory database fallback
     memoryDb.initializeMemoryDb();
   }
