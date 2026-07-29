@@ -194,18 +194,31 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
   }
 
   if (stepNo === 3) {
-    let baseline = 0;
     if (isFallback()) {
-      const rec = memoryDb.tables.lot_part_code_baselines.find(b => b.lot_id === lotId && b.part_code === cleanPartCode);
-      baseline = rec ? rec.verified_qty : 0;
+      const lot = memoryDb.tables.lots.find(l => l.id === lotId);
+      const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+      const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+      const panels = memoryDb.tables.panels.filter(p => 
+        p.lot_id === lotId && 
+        p.part_code === cleanPartCode &&
+        (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear))
+      );
+      return panels.length;
     } else {
-      const res = await pool.query('SELECT verified_qty FROM lot_part_code_baselines WHERE lot_id = $1 AND part_code = $2', [lotId, cleanPartCode]);
-      baseline = res.rows[0]?.verified_qty || 0;
+      const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+      const lot = lotRes.rows[0];
+      const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+      const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+
+      const res = await pool.query(`
+        SELECT COUNT(*)::integer 
+        FROM panels 
+        WHERE lot_id = $1 
+          AND part_code = $2 
+          AND (mfg_year IS NULL OR (mfg_year > $3 AND mfg_year <> $4))
+      `, [lotId, cleanPartCode, scrapYear, sepYear]);
+      return res.rows[0].count;
     }
-    if (baseline === 0) {
-      return getPartCodeStepCap(lotId, 2, cleanPartCode);
-    }
-    return baseline;
   }
 
   if (stepNo === 4) {
