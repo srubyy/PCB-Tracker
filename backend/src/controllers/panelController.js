@@ -1864,16 +1864,10 @@ export const exportExcel = async (req, res) => {
       exportHistory
     );
 
-    await workbook.xlsx.writeFile(pyOutputPath);
-
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
-    res.sendFile(pyOutputPath, (sendErr) => {
-      try { fs.unlinkSync(pyOutputPath); } catch (e) {}
-      if (sendErr) {
-        console.error("File download streaming error:", sendErr);
-      }
-    });
+    await workbook.xlsx.write(res);
+    res.end();
 
   } catch (err) {
     console.error(err);
