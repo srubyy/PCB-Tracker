@@ -34,7 +34,9 @@ export const tables = {
   checkpoint_scans: [],
   checkpoint_results: [],
   missing_pcbs: [],
-  checkpoint_acknowledgements: []
+  checkpoint_acknowledgements: [],
+  client_part_codes: [],
+  lot_part_code_baselines: []
 };
 
 // --- Seed Parsing Helpers ---
@@ -176,6 +178,19 @@ function parseInsertLine(line) {
 }
 
 export function initializeMemoryDb() {
+  tables.client_part_codes = [
+    { id: 1, client_id: 2, part_code: 'SA0019', name: 'PCB GV2_CFEfficio' },
+    { id: 2, client_id: 2, part_code: 'SA0021', name: 'GV2 Main PCB 1200mm Reg_28W' },
+    { id: 3, client_id: 2, part_code: 'SA0022', name: 'GV2 Main PCB 1400mm Reg 35W' },
+    { id: 4, client_id: 2, part_code: 'SA0011', name: 'PCB GV3 Digital Renesat' },
+    { id: 5, client_id: 2, part_code: 'SA0010', name: 'GV3 Smart Digital 1200mm' },
+    { id: 6, client_id: 2, part_code: 'SA0061', name: 'GV3 Power PCB White' },
+    { id: 7, client_id: 2, part_code: 'SA0060', name: 'GV3 Power PCB Black' },
+    { id: 8, client_id: 2, part_code: 'SA0039', name: 'GV4 Studio+ Remote 1200mm' },
+    { id: 9, client_id: 2, part_code: 'SA0038', name: 'GV4 Alpha PCB_Regulator_1200mm' },
+    { id: 10, client_id: 2, part_code: 'SA0087', name: 'GV4 Ozeo PCB_Main_1200mm' }
+  ];
+
   console.log('----------------------------------------------------');
   console.log('📁 Pre-seeding memory database from seed_new.sql...');
   console.log('----------------------------------------------------');

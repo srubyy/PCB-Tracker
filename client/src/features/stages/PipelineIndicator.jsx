@@ -22,15 +22,36 @@ const PipelineIndicator = ({
   hidePCBsButton,
   steps = []
 }) => {
-  const displaySteps = steps.length > 0 
+  const allSteps = steps.length > 0 
     ? steps.map(s => ({ step_no: s.step_no, name: s.name }))
     : STEP_NAMES.map((name, index) => ({ step_no: index + 1, name }));
+
+  // We filter out Step 2, and we map Step 1 as a combined "Step 1 & Step 2"
+  const displaySteps = allSteps.filter(s => s.step_no !== 2).map(s => {
+    if (s.step_no === 1) {
+      return {
+        step_no: 1,
+        isMerged: true,
+        label: "Step 1 & Step 2",
+        name: "Inward and Segregation"
+      };
+    }
+    return {
+      step_no: s.step_no,
+      isMerged: false,
+      label: `Step ${s.step_no}`,
+      name: s.name
+    };
+  });
 
   return (
     <div className="pipeline-step-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(6, 1fr)', gap: 10 }}>
       {displaySteps.map((step) => {
         const stepNo = step.step_no;
-        const isActive = selectedStep === stepNo;
+        const isActive = step.isMerged 
+          ? [1, 2].includes(selectedStep) 
+          : selectedStep === stepNo;
+          
         return (
           <div
             key={stepNo}
@@ -43,11 +64,14 @@ const PipelineIndicator = ({
               cursor: 'pointer',
               textAlign: 'center',
               transition: 'all 0.2s',
-              boxShadow: isActive ? '0 0 10px rgba(255, 212, 0, 0.15)' : 'none'
+              boxShadow: isActive ? '0 0 10px rgba(255, 212, 0, 0.15)' : 'none',
+              gridColumn: step.isMerged ? 'span 2' : 'auto'
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 }}>
-              <span style={{ fontSize: '0.7rem', color: isActive ? 'var(--color-primary)' : 'var(--text-muted)', fontWeight: 800 }}>Step {stepNo}</span>
+              <span style={{ fontSize: '0.7rem', color: isActive ? 'var(--color-primary)' : 'var(--text-muted)', fontWeight: 800 }}>
+                {step.label}
+              </span>
               {!hidePCBsButton && (
                 <span 
                   onClick={(e) => {

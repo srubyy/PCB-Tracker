@@ -4,6 +4,7 @@ import { Client } from '../models/Client.js';
 import { Transaction } from '../models/Transaction.js';
 import { Panel } from '../models/Panel.js';
 import { RepairStep } from '../models/RepairStep.js';
+import * as memoryDb from '../services/memoryDb.js';
 
 // Helper function to check Complete state lock
 const checkCompleteLock = async (lotId, userRole, clientTransaction = null) => {
@@ -579,5 +580,30 @@ export const updateClientSteps = async (req, res) => {
     }
     console.error('Update client steps error:', err);
     res.status(500).json({ error: "Failed to update steps." });
+  }
+};
+
+export const getClientPartCodes = async (req, res) => {
+  const { id } = req.params;
+  const clientId = parseInt(id, 10);
+  if (isNaN(clientId)) {
+    return res.status(400).json({ error: "Invalid client ID." });
+  }
+
+  try {
+    let partCodes = [];
+    if (isFallback()) {
+      partCodes = memoryDb.tables.client_part_codes.filter(p => p.client_id === clientId);
+    } else {
+      const resDb = await pool.query(
+        'SELECT part_code, name FROM client_part_codes WHERE client_id = $1 ORDER BY part_code ASC',
+        [clientId]
+      );
+      partCodes = resDb.rows;
+    }
+    res.json(partCodes);
+  } catch (err) {
+    console.error('Fetch client part codes error:', err);
+    res.status(500).json({ error: "Failed to fetch part codes for this client." });
   }
 };

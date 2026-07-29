@@ -204,42 +204,34 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     }
   };
 
-  const getExpectedQtyForSelectedPcbType = () => {
-    if (!lotProductionStats) return 0;
-    if (!lotProductionStats.part_code_counts || Object.keys(lotProductionStats.part_code_counts).length === 0) {
-      return lotProductionStats.received_qty;
-    }
-    const partCodePrefix = productionPcbType.split(' - ')[0].trim().toLowerCase();
-    const matchedKey = Object.keys(lotProductionStats.part_code_counts).find(
-      key => key.trim().toLowerCase() === partCodePrefix
-    );
-    return matchedKey ? lotProductionStats.part_code_counts[matchedKey] : 0;
+  const presetPartCodeNames = {
+    "SA0019": "PCB GV2_CFEfficio",
+    "SA0021": "GV2  Main PCB 1200mm Reg_28W",
+    "SA0022": "GV2 Main PCB 1400mm Reg 35W",
+    "SA0011": "PCB GV3 Digital Renesat",
+    "SA0010": "GV3 Smart Digital 1200mm",
+    "SA0061": "GV3 Power PCB White",
+    "SA0060": "GV3 Power PCB Black",
+    "SA0039": "GV4 Studio+ Remote_ 1200mm",
+    "SA0038": "GV4 Alpha PCB_Regulator_1200mm",
+    "SA0087": "GV4 Ozeo PCB_Main_1200mm"
   };
 
-  const getLimitForStepAndPcbType = (stepNo) => {
-    if (!lotProductionStats) return 0;
-    const partCodePrefix = productionPcbType.split(' - ')[0].trim().toLowerCase();
-
-    if (stepNo >= 2 && stepNo <= 6) {
-      if (!lotProductionStats.part_code_counts || Object.keys(lotProductionStats.part_code_counts).length === 0) {
-        return lotProductionStats.received_qty;
-      }
-      const matchedKey = Object.keys(lotProductionStats.part_code_counts).find(
-        key => key.trim().toLowerCase() === partCodePrefix
-      );
-      return matchedKey ? lotProductionStats.part_code_counts[matchedKey] : 0;
-    } else if (stepNo >= 7 && stepNo <= 10) {
-      if (!lotProductionStats.step6_part_code_counts) return 0;
-      const matchedKey = Object.keys(lotProductionStats.step6_part_code_counts).find(
-        key => key.trim().toLowerCase() === partCodePrefix
-      );
-      return matchedKey ? lotProductionStats.step6_part_code_counts[matchedKey] : 0;
+  const getDynamicCapForStepAndPcbType = (stepNo) => {
+    if (!lotProductionStats || !productionPcbType) return 0;
+    const partCode = productionPcbType.split(' - ')[0].trim();
+    if (stepNo === 2) {
+      if (!lotProductionStats.part_code_counts) return 0;
+      return lotProductionStats.part_code_counts[partCode] || 0;
+    }
+    if (lotProductionStats.part_code_caps && lotProductionStats.part_code_caps[partCode]) {
+      return lotProductionStats.part_code_caps[partCode][stepNo] ?? 0;
     }
     return 0;
   };
 
   const getExistingLoggedQtyForSelectedPcbType = (stepNo) => {
-    if (!lotProductionStats || !lotProductionStats.pcb_type_stats) return 0;
+    if (!lotProductionStats || !lotProductionStats.pcb_type_stats || !productionPcbType) return 0;
     const key = `${stepNo}_${productionPcbType}`;
     const stats = lotProductionStats.pcb_type_stats[key];
     if (!stats) return 0;
@@ -256,35 +248,155 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     return 0;
   };
 
-  const PcbTypeWarning = ({ stepNo, inputs }) => {
-    if (!lotProductionStats || !productionPcbType) return null;
+  const getProductionInputSum = () => {
+    const inputs = stepInputs;
+    const stepNo = selectedProductionStep;
+    if (stepNo === 2) return (parseInt(inputs.repairable_qty || 0) + parseInt(inputs.scrap_qty || 0));
+    if (stepNo === 3) return (parseInt(inputs.code_ok || 0) + parseInt(inputs.code_not_ok || 0));
+    if (stepNo === 4) return (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+    if (stepNo === 5) return (parseInt(inputs.debug_ok || 0) + parseInt(inputs.critical_qty || 0) + parseInt(inputs.scrap_qty || 0));
+    if (stepNo === 6) return parseInt(inputs.entry_count || 0);
+    if (stepNo === 7) return (parseInt(inputs.qty_cleaned || 0) + parseInt(inputs.qc_reject || 0));
+    if (stepNo === 8) return (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+    if (stepNo === 9) return parseInt(inputs.qty_coated || 0);
+    if (stepNo === 10) return (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+    return 0;
+  };
 
-    let inputSum = 0;
-    if (stepNo === 2) inputSum = (parseInt(inputs.repairable_qty || 0) + parseInt(inputs.scrap_qty || 0));
-    else if (stepNo === 3) inputSum = (parseInt(inputs.code_ok || 0) + parseInt(inputs.code_not_ok || 0));
-    else if (stepNo === 4) inputSum = (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
-    else if (stepNo === 5) inputSum = (parseInt(inputs.debug_ok || 0) + parseInt(inputs.critical_qty || 0) + parseInt(inputs.scrap_qty || 0));
-    else if (stepNo === 6) inputSum = parseInt(inputs.entry_count || 0);
-    else if (stepNo === 7) inputSum = (parseInt(inputs.qty_cleaned || 0) + parseInt(inputs.qc_reject || 0));
-    else if (stepNo === 8) inputSum = (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
-    else if (stepNo === 9) inputSum = parseInt(inputs.qty_coated || 0);
-    else if (stepNo === 10) inputSum = (parseInt(inputs.qty_passed || 0) + parseInt(inputs.qty_failed || 0));
+  const isSubmitDisabled = () => {
+    if (selectedProductionStep < 2) return false;
+    const limit = getDynamicCapForStepAndPcbType(selectedProductionStep);
+    const existing = getExistingLoggedQtyForSelectedPcbType(selectedProductionStep);
+    const inputSum = getProductionInputSum();
+    const remaining = limit - existing;
+    return inputSum > remaining;
+  };
 
-    const limit = getLimitForStepAndPcbType(stepNo);
-    const existing = getExistingLoggedQtyForSelectedPcbType(stepNo);
-    const total = existing + inputSum;
+  const getDropdownOptions = () => {
+    const defaultOptions = [
+      { code: "SA0019", name: "PCB GV2_CFEfficio" },
+      { code: "SA0021", name: "GV2  Main PCB 1200mm Reg_28W" },
+      { code: "SA0022", name: "GV2 Main PCB 1400mm Reg 35W" },
+      { code: "SA0011", name: "PCB GV3 Digital Renesat" },
+      { code: "SA0010", name: "GV3 Smart Digital 1200mm" },
+      { code: "SA0061", name: "GV3 Power PCB White" },
+      { code: "SA0060", name: "GV3 Power PCB Black" },
+      { code: "SA0039", name: "GV4 Studio+ Remote_ 1200mm" },
+      { code: "SA0038", name: "GV4 Alpha PCB_Regulator_1200mm" },
+      { code: "SA0087", name: "GV4 Ozeo PCB_Main_1200mm" }
+    ];
 
-    if (total > limit) {
-      const partCodePrefix = productionPcbType.split(' - ')[0].trim();
-      const limitLabel = (stepNo >= 2 && stepNo <= 6) ? 'inward' : 'Step 6 audited';
-      return (
-        <div style={{ color: '#ef4444', fontSize: '0.72rem', marginTop: 4, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span>⚠️ Warning: Cumulative total ({total}) would exceed the {limitLabel} limit for {partCodePrefix} ({limit})!</span>
-          <span style={{ opacity: 0.8 }}>(Already logged: {existing}, entering now: {inputSum})</span>
-        </div>
-      );
+    if (!lotProductionStats || !lotProductionStats.part_code_baselines || lotProductionStats.part_code_baselines.length === 0) {
+      return defaultOptions.map(opt => ({
+        value: `${opt.code} - ${opt.name}`,
+        label: `${opt.code} — ${opt.name}`
+      }));
     }
-    return null;
+
+    return lotProductionStats.part_code_baselines.map(base => {
+      const name = presetPartCodeNames[base.part_code] || base.part_code;
+      return {
+        value: `${base.part_code} - ${name}`,
+        label: `${base.part_code} — ${name}  (verified: ${base.verified_qty} PCBs)`
+      };
+    });
+  };
+
+  const CapIndicatorCard = () => {
+    if (selectedProductionStep < 2 || !lotProductionStats || !productionPcbType) return null;
+
+    const limit = getDynamicCapForStepAndPcbType(selectedProductionStep);
+    const existing = getExistingLoggedQtyForSelectedPcbType(selectedProductionStep);
+    const inputSum = getProductionInputSum();
+    const remaining = limit - existing;
+    const isExceeded = inputSum > remaining;
+
+    const percentage = remaining > 0 ? Math.min(100, Math.max(0, (inputSum / remaining) * 100)) : 0;
+
+    return (
+      <div style={{
+        background: 'var(--card-bg)',
+        border: `1px solid ${isExceeded ? '#ef4444' : 'var(--card-border)'}`,
+        borderRadius: 12,
+        padding: 16,
+        marginBottom: 20,
+        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12
+      }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: isExceeded ? '#ef4444' : 'var(--color-primary)' }}>
+            Step-by-Step Cap Indicator
+          </span>
+          <span style={{ fontSize: '0.75rem', fontWeight: 600, color: isExceeded ? '#ef4444' : 'var(--text-muted)' }}>
+            {isExceeded ? 'Limit Exceeded' : `${remaining} PCBs Available`}
+          </span>
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, textAlign: 'center' }}>
+          <div style={{ background: 'var(--input-bg)', padding: 8, borderRadius: 8 }}>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Previous Step OK</div>
+            <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>{limit}</div>
+          </div>
+          <div style={{ background: 'var(--input-bg)', padding: 8, borderRadius: 8 }}>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Already Logged</div>
+            <div style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--text-main)' }}>{existing}</div>
+          </div>
+          <div style={{ background: 'var(--input-bg)', padding: 8, borderRadius: 8 }}>
+            <div style={{ fontSize: '0.68rem', color: 'var(--text-muted)' }}>Remaining Balance</div>
+            <div style={{ fontSize: '1rem', fontWeight: 800, color: isExceeded ? '#ef4444' : 'var(--text-main)' }}>
+              {remaining}
+            </div>
+          </div>
+        </div>
+
+        <div style={{ width: '100%', height: 8, background: 'var(--input-bg)', borderRadius: 4, overflow: 'hidden' }}>
+          <div style={{
+            width: `${percentage}%`,
+            height: '100%',
+            background: isExceeded ? '#ef4444' : 'var(--color-primary)',
+            borderRadius: 4,
+            transition: 'width 0.3s ease, background-color 0.3s ease'
+          }} />
+        </div>
+      </div>
+    );
+  };
+
+  const PcbTypeWarning = ({ stepNo, inputs }) => {
+    if (stepNo < 2 || !lotProductionStats || !productionPcbType) return null;
+
+    const limit = getDynamicCapForStepAndPcbType(stepNo);
+    const existing = getExistingLoggedQtyForSelectedPcbType(stepNo);
+    const inputSum = getProductionInputSum();
+    const remaining = limit - existing;
+    const isExceeded = inputSum > remaining;
+
+    return (
+      <div style={{ marginTop: 12 }}>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginBottom: 4 }}>
+          Running Total (Current Input): <strong style={{ color: 'var(--text-main)' }}>{inputSum} PCBs</strong> / Remaining Balance: <strong>{remaining} PCBs</strong>
+        </div>
+        {isExceeded && (
+          <div style={{
+            background: 'rgba(239, 68, 68, 0.1)',
+            border: '1px solid #ef4444',
+            color: '#ef4444',
+            padding: '10px 14px',
+            borderRadius: 8,
+            fontSize: '0.75rem',
+            fontWeight: 600,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 8
+          }}>
+            <span>⚠️ Warning: Entering {inputSum} PCBs exceeds the remaining balance of {remaining} PCBs for this part code!</span>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const fetchCheckpointResults = async (lotId = productionLotId) => {
@@ -701,16 +813,9 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                   onChange={e => setProductionPcbType(e.target.value)}
                   style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
                 >
-                  <option value="SA0019 - PCB GV2_CFEfficio">SA0019 - PCB GV2_CFEfficio</option>
-                  <option value="SA0021 - GV2  Main PCB 1200mm Reg_28W">SA0021 - GV2  Main PCB 1200mm Reg_28W</option>
-                  <option value="SA0022 - GV2 Main PCB 1400mm Reg 35W">SA0022 - GV2 Main PCB 1400mm Reg 35W</option>
-                  <option value="SA0011 - PCB GV3 Digital Renesat">SA0011 - PCB GV3 Digital Renesat</option>
-                  <option value="SA0010 - GV3 Smart Digital 1200mm">SA0010 - GV3 Smart Digital 1200mm</option>
-                  <option value="SA0061 - GV3 Power PCB White">SA0061 - GV3 Power PCB White</option>
-                  <option value="SA0060 - GV3 Power PCB Black">SA0060 - GV3 Power PCB Black</option>
-                  <option value="SA0039 - GV4 Studio+ Remote_ 1200mm">SA0039 - GV4 Studio+ Remote_ 1200mm</option>
-                  <option value="SA0038 - GV4 Alpha PCB_Regulator_1200mm">SA0038 - GV4 Alpha PCB_Regulator_1200mm</option>
-                  <option value="SA0087 - GV4 Ozeo PCB_Main_1200mm">SA0087 - GV4 Ozeo PCB_Main_1200mm</option>
+                  {getDropdownOptions().map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
                 </select>
               </div>
 
@@ -744,7 +849,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
           ) : user?.role === 'Employee' ? (
             <div>
               <h2 style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-primary)', borderBottom: '1px solid var(--card-border)', paddingBottom: 8, marginBottom: 16 }}>
-                Log Production Batch - Step {selectedProductionStep}: {steps[selectedProductionStep - 1]?.name || 'Unknown Step'}
+                Log Production Batch - {selectedProductionStep === 1 ? 'Step 1 & Step 2: Inward and Segregation' : `Step ${selectedProductionStep}: ${steps[selectedProductionStep - 1]?.name || 'Unknown Step'}`}
               </h2>
 
               <form onSubmit={handleProductionLogSubmit}>
@@ -755,18 +860,13 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                     onChange={e => setProductionPcbType(e.target.value)}
                     style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
                   >
-                    <option value="SA0019 - PCB GV2_CFEfficio">SA0019 - PCB GV2_CFEfficio</option>
-                    <option value="SA0021 - GV2  Main PCB 1200mm Reg_28W">SA0021 - GV2  Main PCB 1200mm Reg_28W</option>
-                    <option value="SA0022 - GV2 Main PCB 1400mm Reg 35W">SA0022 - GV2 Main PCB 1400mm Reg 35W</option>
-                    <option value="SA0011 - PCB GV3 Digital Renesat">SA0011 - PCB GV3 Digital Renesat</option>
-                    <option value="SA0010 - GV3 Smart Digital 1200mm">SA0010 - GV3 Smart Digital 1200mm</option>
-                    <option value="SA0061 - GV3 Power PCB White">SA0061 - GV3 Power PCB White</option>
-                    <option value="SA0060 - GV3 Power PCB Black">SA0060 - GV3 Power PCB Black</option>
-                    <option value="SA0039 - GV4 Studio+ Remote_ 1200mm">SA0039 - GV4 Studio+ Remote_ 1200mm</option>
-                    <option value="SA0038 - GV4 Alpha PCB_Regulator_1200mm">SA0038 - GV4 Alpha PCB_Regulator_1200mm</option>
-                    <option value="SA0087 - GV4 Ozeo PCB_Main_1200mm">SA0087 - GV4 Ozeo PCB_Main_1200mm</option>
+                    {getDropdownOptions().map(opt => (
+                      <option key={opt.value} value={opt.value}>{opt.label}</option>
+                    ))}
                   </select>
                 </div>
+
+                <CapIndicatorCard />
                 {selectedProductionStep === 1 && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
                     <div style={{ display: 'flex', gap: 8, background: 'var(--input-bg)', padding: 4, borderRadius: 8, border: '1px solid var(--card-border)' }}>
@@ -1176,7 +1276,16 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                 )}
 
                 {!(selectedProductionStep === 1 && inwardTab === 'mapping') && (
-                  <button type="submit" className="btn" style={{ marginTop: 16 }}>
+                  <button
+                    type="submit"
+                    className="btn"
+                    style={{
+                      marginTop: 16,
+                      opacity: isSubmitDisabled() ? 0.5 : 1,
+                      cursor: isSubmitDisabled() ? 'not-allowed' : 'pointer'
+                    }}
+                    disabled={isSubmitDisabled()}
+                  >
                     Submit Step Production Log <ArrowRight size={14} />
                   </button>
                 )}
@@ -1206,7 +1315,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
             /* Vetting & Approvals Queue for Selected Step (TL) */
             <div>
               <h2 className="vetting-queue-header" style={{ fontSize: '1rem', fontWeight: 800, color: 'var(--color-primary)', borderBottom: '1px solid var(--card-border)', paddingBottom: 8, marginBottom: 16, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 10 }}>
-                <span>Vetting & Approvals Queue - Step {selectedProductionStep}: {steps[selectedProductionStep - 1]?.name || 'Unknown Step'}</span>
+                <span>Vetting & Approvals Queue - {selectedProductionStep === 1 ? 'Step 1 & Step 2: Inward and Segregation' : `Step ${selectedProductionStep}: ${steps[selectedProductionStep - 1]?.name || 'Unknown Step'}`}</span>
                 <button
                   onClick={() => fetchPendingProductionLogs(selectedProductionStep)}
                   className="btn btn-secondary"

@@ -11,7 +11,8 @@ import {
   toggleComplete,
   addClient,
   getClientSteps,
-  updateClientSteps
+  updateClientSteps,
+  getClientPartCodes
 } from '../controllers/stockController.js';
 import { authenticateJWT, authorize } from '../middlewares/authMiddleware.js';
 
@@ -22,6 +23,7 @@ router.get('/clients', authenticateJWT, getClients);
 router.post('/clients', authenticateJWT, authorize(['Team Lead']), addClient);
 router.get('/clients/:id/steps', authenticateJWT, getClientSteps);
 router.put('/clients/:id/steps', authenticateJWT, authorize(['Team Lead']), updateClientSteps);
+router.get('/clients/:id/part-codes', authenticateJWT, getClientPartCodes);
 router.post('/inward', authenticateJWT, authorize(['Team Lead']), inward);
 router.post('/outward', authenticateJWT, authorize(['Team Lead']), outward);
 router.post('/return', authenticateJWT, authorize(['Team Lead']), customerReturn);

@@ -108,6 +108,146 @@ const getPartCodeLimit = async (lotId, limitType, partCode) => {
   return 0;
 };
 
+const getStepOkSum = async (lotId, stepNo, partCode, okField) => {
+  if (isFallback()) {
+    const comLogs = memoryDb.tables.production_logs.filter(
+      l => l.lot_id === lotId && 
+           l.step_no === stepNo && 
+           l.pcb_type.split(' - ')[0].trim() === partCode
+    );
+    let sum = 0;
+    comLogs.forEach(l => {
+      sum += parseInt(l.step_data[okField] || 0);
+    });
+    return sum;
+  }
+
+  const res = await pool.query(
+    `SELECT COALESCE(SUM((step_data->>$1)::integer), 0) AS total
+     FROM production_logs
+     WHERE lot_id = $2 AND step_no = $3 AND SPLIT_PART(pcb_type, ' - ', 1) = $4`,
+    [okField, lotId, stepNo, partCode]
+  );
+  return parseInt(res.rows[0].total || 0);
+};
+
+const getStep6AuditLimit = async (lotId, partCode) => {
+  let auditCount = 0;
+  if (isFallback()) {
+    auditCount = (memoryDb.tables.checkpoint_scans || []).filter(
+      cs => cs.lot_id === lotId && 
+            cs.checkpoint_step === 6 && 
+            !cs.is_unknown && 
+            (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
+    ).length;
+  } else {
+    const res = await pool.query(`
+      SELECT COUNT(*)::integer 
+      FROM checkpoint_scans cs 
+      JOIN panels p ON cs.panel_id = p.id 
+      WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND p.part_code = $2 AND cs.is_unknown = FALSE
+    `, [lotId, partCode]);
+    auditCount = res.rows[0].count;
+  }
+
+  if (auditCount === 0) {
+    return getStepOkSum(lotId, 6, partCode, 'entry_count');
+  }
+  return auditCount;
+};
+
+const getStep10AuditLimit = async (lotId, partCode) => {
+  let auditCount = 0;
+  if (isFallback()) {
+    auditCount = (memoryDb.tables.checkpoint_scans || []).filter(
+      cs => cs.lot_id === lotId && 
+            cs.checkpoint_step === 10 && 
+            !cs.is_unknown && 
+            (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
+    ).length;
+  } else {
+    const res = await pool.query(`
+      SELECT COUNT(*)::integer 
+      FROM checkpoint_scans cs 
+      JOIN panels p ON cs.panel_id = p.id 
+      WHERE cs.lot_id = $1 AND cs.checkpoint_step = 10 AND p.part_code = $2 AND cs.is_unknown = FALSE
+    `, [lotId, partCode]);
+    auditCount = res.rows[0].count;
+  }
+
+  if (auditCount === 0) {
+    return getStepOkSum(lotId, 10, partCode, 'qty_passed');
+  }
+  return auditCount;
+};
+
+export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
+  const cleanPartCode = partCode.split(' - ')[0].trim();
+
+  if (stepNo === 2) {
+    if (isFallback()) {
+      return memoryDb.tables.panels.filter(p => p.lot_id === lotId && p.part_code === cleanPartCode).length;
+    } else {
+      const res = await pool.query('SELECT COUNT(*)::integer FROM panels WHERE lot_id = $1 AND part_code = $2', [lotId, cleanPartCode]);
+      return res.rows[0].count;
+    }
+  }
+
+  if (stepNo === 3) {
+    let baseline = 0;
+    if (isFallback()) {
+      const rec = memoryDb.tables.lot_part_code_baselines.find(b => b.lot_id === lotId && b.part_code === cleanPartCode);
+      baseline = rec ? rec.verified_qty : 0;
+    } else {
+      const res = await pool.query('SELECT verified_qty FROM lot_part_code_baselines WHERE lot_id = $1 AND part_code = $2', [lotId, cleanPartCode]);
+      baseline = res.rows[0]?.verified_qty || 0;
+    }
+    if (baseline === 0) {
+      return getPartCodeStepCap(lotId, 2, cleanPartCode);
+    }
+    return baseline;
+  }
+
+  if (stepNo === 4) {
+    return getStepOkSum(lotId, 3, cleanPartCode, 'code_ok');
+  }
+
+  if (stepNo === 5) {
+    return getStepOkSum(lotId, 4, cleanPartCode, 'qty_passed');
+  }
+
+  if (stepNo === 6) {
+    return getStepOkSum(lotId, 5, cleanPartCode, 'debug_ok');
+  }
+
+  if (stepNo === 7) {
+    return getStep6AuditLimit(lotId, cleanPartCode);
+  }
+
+  if (stepNo === 8) {
+    return getStepOkSum(lotId, 7, cleanPartCode, 'qty_cleaned');
+  }
+
+  if (stepNo === 9) {
+    return getStepOkSum(lotId, 8, cleanPartCode, 'qty_passed');
+  }
+
+  if (stepNo === 10) {
+    return getStepOkSum(lotId, 9, cleanPartCode, 'qty_coated');
+  }
+
+  if (stepNo === 11) {
+    return getStep10AuditLimit(lotId, cleanPartCode);
+  }
+
+  if (stepNo === 12) {
+    return getStepOkSum(lotId, 11, cleanPartCode, 'bubble_packed');
+  }
+
+  return 999999;
+};
+
+
 export const getProductionLogs = async (req, res) => {
   const { lot_id, step_no } = req.query;
 
@@ -233,94 +373,36 @@ export const logProduction = async (req, res) => {
 
     // Checksums Validation
     const partCode = pcb_type.split(' - ')[0].trim();
-    if (stepNo === 2) {
-      const { repairable_qty, scrap_qty } = step_data;
-      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
-      const existing = await getStepSumForPcbType(lotId, 2, pcb_type, ['repairable_qty', 'scrap_qty']);
-      const total = existing.repairable_qty + existing.scrap_qty + parseInt(repairable_qty || 0) + parseInt(scrap_qty || 0);
-      if (total > inwardLimit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total segregated PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 3) {
-      const { code_ok, code_not_ok } = step_data;
-      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
-      const existing = await getStepSumForPcbType(lotId, 3, pcb_type, ['code_ok', 'code_not_ok']);
-      const total = existing.code_ok + existing.code_not_ok + parseInt(code_ok || 0) + parseInt(code_not_ok || 0);
-      if (total > inwardLimit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total programmed PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 4) {
-      const { qty_passed, qty_failed } = step_data;
-      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
-      const existing = await getStepSumForPcbType(lotId, 4, pcb_type, ['qty_passed', 'qty_failed']);
-      const total = existing.qty_passed + existing.qty_failed + parseInt(qty_passed || 0) + parseInt(qty_failed || 0);
-      if (total > inwardLimit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total tested PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 5) {
-      const { debug_ok, critical_qty, scrap_qty } = step_data;
-      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
-      const existing = await getStepSumForPcbType(lotId, 5, pcb_type, ['debug_ok', 'critical_qty', 'scrap_qty']);
-      const total = existing.debug_ok + existing.critical_qty + existing.scrap_qty + parseInt(debug_ok || 0) + parseInt(critical_qty || 0) + parseInt(scrap_qty || 0);
-      if (total > inwardLimit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total debugged PCBs of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 6) {
-      const { entry_count } = step_data;
-      const inwardLimit = await getPartCodeLimit(lotId, 'inward', partCode);
-      const existing = await getStepSumForPcbType(lotId, 6, pcb_type, ['entry_count']);
-      const total = existing.entry_count + parseInt(entry_count || 0);
-      if (total > inwardLimit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total entry count of ${partCode} (${total}) would exceed the inward Step 1 count (${inwardLimit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 7) {
-      const { qty_cleaned, qc_reject } = step_data;
-      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
-      const existing = await getStepSumForPcbType(lotId, 7, pcb_type, ['qty_cleaned', 'qc_reject']);
-      const total = existing.qty_cleaned + existing.qc_reject + parseInt(qty_cleaned || 0) + parseInt(qc_reject || 0);
-      if (total > step6Limit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total cleaned PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 8) {
-      const { qty_passed, qty_failed } = step_data;
-      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
-      const existing = await getStepSumForPcbType(lotId, 8, pcb_type, ['qty_passed', 'qty_failed']);
-      const total = existing.qty_passed + existing.qty_failed + parseInt(qty_passed || 0) + parseInt(qty_failed || 0);
-      if (total > step6Limit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total QC-inspected PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 9) {
-      const { qty_coated } = step_data;
-      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
-      const existing = await getStepSumForPcbType(lotId, 9, pcb_type, ['qty_coated']);
-      const total = existing.qty_coated + parseInt(qty_coated || 0);
-      if (total > step6Limit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total coated PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 10) {
-      const { qty_passed, qty_failed } = step_data;
-      const step6Limit = await getPartCodeLimit(lotId, 'step6', partCode);
-      const existing = await getStepSumForPcbType(lotId, 10, pcb_type, ['qty_passed', 'qty_failed']);
-      const total = existing.qty_passed + existing.qty_failed + parseInt(qty_passed || 0) + parseInt(qty_failed || 0);
-      if (total > step6Limit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total final-tested PCBs of ${partCode} (${total}) would exceed the Step 6 audit count (${step6Limit}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 11) {
-      const { bubble_packed, box_packed } = step_data;
-      const step10 = await getStepSum(lotId, 10, ['qty_passed']);
-      const existing = await getStepSum(lotId, 11, ['bubble_packed', 'box_packed']);
-      const total = existing.bubble_packed + existing.box_packed + parseInt(bubble_packed || 0) + parseInt(box_packed || 0);
-      if (total > step10.qty_passed) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total packed PCBs (${total}) would exceed the final test-passed count (${step10.qty_passed}) of Lot ${lot.lot_no}.` });
-      }
-    } else if (stepNo === 12) {
-      const { entry_count } = step_data;
-      const step11 = await getStepSum(lotId, 11, ['bubble_packed', 'box_packed']);
-      const limit = step11.bubble_packed + step11.box_packed;
-      const existing = await getStepSum(lotId, 12, ['entry_count']);
-      const total = existing.entry_count + parseInt(entry_count || 0);
-      if (total > limit) {
-        return res.status(400).json({ error: `🚫 Checksum Error: Total final entries (${total}) would exceed the packed count (${limit}) of Lot ${lot.lot_no}.` });
+    if (stepNo >= 2 && stepNo <= 12) {
+      let fields = [];
+      if (stepNo === 2) fields = ['repairable_qty', 'scrap_qty'];
+      else if (stepNo === 3) fields = ['code_ok', 'code_not_ok'];
+      else if (stepNo === 4) fields = ['qty_passed', 'qty_failed'];
+      else if (stepNo === 5) fields = ['debug_ok', 'critical_qty', 'scrap_qty'];
+      else if (stepNo === 6) fields = ['entry_count'];
+      else if (stepNo === 7) fields = ['qty_cleaned', 'qc_reject'];
+      else if (stepNo === 8) fields = ['qty_passed', 'qty_failed'];
+      else if (stepNo === 9) fields = ['qty_coated'];
+      else if (stepNo === 10) fields = ['qty_passed', 'qty_failed'];
+      else if (stepNo === 11) fields = ['bubble_packed', 'box_packed'];
+      else if (stepNo === 12) fields = ['entry_count'];
+
+      const stepCap = await getPartCodeStepCap(lotId, stepNo, partCode);
+      const existing = await getStepSumForPcbType(lotId, stepNo, pcb_type, fields);
+      
+      let currentInputSum = 0;
+      fields.forEach(f => {
+        currentInputSum += parseInt(step_data[f] || 0);
+      });
+      
+      let existingSum = 0;
+      fields.forEach(f => {
+        existingSum += parseInt(existing[f] || 0);
+      });
+
+      const total = existingSum + currentInputSum;
+      if (total > stepCap) {
+        return res.status(400).json({ error: `🚫 Checksum Error: Total quantity for ${partCode} (${total}) would exceed the allowed cap (${stepCap}) for Step ${stepNo} of Lot ${lot.lot_no}.` });
       }
     }
 
@@ -430,8 +512,12 @@ export const tlApproveLog = async (req, res) => {
           lot.received_qty = (lot.received_qty || 0) + recCount;
           lot.qty_sent = (lot.qty_sent || 0) + expectedCount;
         }
+        memoryDb.tables.lot_part_code_baselines
+          .filter(b => b.lot_id === pLog.lot_id)
+          .forEach(b => { b.locked = true; });
       } else {
         await txClient.query('UPDATE lots SET received_qty = received_qty + $1, qty_sent = qty_sent + $2 WHERE id = $3', [recCount, expectedCount, pLog.lot_id]);
+        await txClient.query('UPDATE lot_part_code_baselines SET locked = true WHERE lot_id = $1', [pLog.lot_id]);
       }
     }
 
@@ -660,6 +746,27 @@ export const getLotProductionStats = async (req, res) => {
       });
     }
     stats.pcb_type_stats = pcbTypeStats;
+
+    let baselines = [];
+    if (isFallback()) {
+      baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId);
+    } else {
+      const baseRes = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1', [lotId]);
+      baselines = baseRes.rows;
+    }
+    stats.part_code_baselines = baselines;
+
+    const partCodeCaps = {};
+    const partCodesList = Object.keys(partCodeCounts);
+    for (const pc of partCodesList) {
+      if (pc) {
+        partCodeCaps[pc] = {};
+        for (let s = 2; s <= 12; s++) {
+          partCodeCaps[pc][s] = await getPartCodeStepCap(lotId, s, pc);
+        }
+      }
+    }
+    stats.part_code_caps = partCodeCaps;
 
     // Pull aggregates sequentially for the 12 steps
     stats.steps[1] = { inward: lot.received_qty, expected: lot.qty_sent, shortage: lot.qty_sent - lot.received_qty };

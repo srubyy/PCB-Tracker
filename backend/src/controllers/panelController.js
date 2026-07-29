@@ -1,6 +1,7 @@
 import pool, { isFallback, query } from '../config/db.js';
 import XLSX from 'xlsx';
 import ExcelJS from 'exceljs';
+import { buildExportWorkbook } from '../utils/export.js';
 import { Panel } from '../models/Panel.js';
 import { Lot } from '../models/Lot.js';
 import { PendingLog } from '../models/PendingLog.js';
@@ -831,6 +832,7 @@ const findColumnIndices = (sheetRows) => {
   let mfgYearColIdx = -1;
   let partCodeColIdx = -1;
   let modelColIdx = -1;
+  let boxColIdx = -1;
 
   for (let r = 0; r < Math.min(sheetRows.length, 20); r++) {
     const row = sheetRows[r];
@@ -852,9 +854,70 @@ const findColumnIndices = (sheetRows) => {
       if (modelColIdx === -1 && (val === 'model' || val === 'model name' || val === 'product model')) {
         modelColIdx = c;
       }
+      if (boxColIdx === -1 && (val === 'box' || val === 'box no' || val === 'box_no' || val === 'box number')) {
+        boxColIdx = c;
+      }
     }
   }
-  return { dummyColIdx, barcodeColIdx, mfgYearColIdx, partCodeColIdx, modelColIdx };
+  return { dummyColIdx, barcodeColIdx, mfgYearColIdx, partCodeColIdx, modelColIdx, boxColIdx };
+};
+
+export const initializeLotBaselines = async (lotId, clientTransaction = null) => {
+  const db = clientTransaction || pool;
+  if (isFallback()) {
+    const lot = memoryDb.tables.lots.find(l => l.id === lotId);
+    const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+    const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+
+    // Delete unlocked baselines
+    memoryDb.tables.lot_part_code_baselines = memoryDb.tables.lot_part_code_baselines.filter(
+      b => !(b.lot_id === lotId && b.locked === false)
+    );
+    // Find panels in this lot and group by part_code (excluding scrap and separate)
+    const panels = memoryDb.tables.panels.filter(p => 
+      p.lot_id === lotId &&
+      (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear))
+    );
+    const groups = {};
+    panels.forEach(p => {
+      const pc = p.part_code || '';
+      if (pc) {
+        groups[pc] = (groups[pc] || 0) + 1;
+      }
+    });
+    Object.entries(groups).forEach(([pc, qty]) => {
+      const exists = memoryDb.tables.lot_part_code_baselines.some(b => b.lot_id === lotId && b.part_code === pc);
+      if (!exists) {
+        memoryDb.tables.lot_part_code_baselines.push({
+          id: Date.now() + Math.random(),
+          lot_id: lotId,
+          part_code: pc,
+          verified_qty: qty,
+          locked: false
+        });
+      }
+    });
+  } else {
+    const lotRes = await db.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+    const lot = lotRes.rows[0];
+    const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+    const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+
+    // Delete unlocked baselines
+    await db.query('DELETE FROM lot_part_code_baselines WHERE lot_id = $1 AND locked = false', [lotId]);
+    // Insert fresh unlocked ones (excluding scrap and separate)
+    await db.query(`
+      INSERT INTO lot_part_code_baselines (lot_id, part_code, verified_qty, locked)
+      SELECT lot_id, part_code, COUNT(*)::integer, false
+      FROM panels
+      WHERE lot_id = $1 
+        AND part_code IS NOT NULL 
+        AND part_code <> ''
+        AND (mfg_year IS NULL OR (mfg_year > $2 AND mfg_year <> $3))
+      GROUP BY lot_id, part_code
+      ON CONFLICT (lot_id, part_code) DO NOTHING
+    `, [lotId, scrapYear, sepYear]);
+  }
 };
 
 const syncExcelPanels = async (lotId, sheets) => {
@@ -884,7 +947,7 @@ const syncExcelPanels = async (lotId, sheets) => {
   if (!targetSheetName) return;
 
   const rows = sheets[targetSheetName];
-  const { dummyColIdx, barcodeColIdx, partCodeColIdx, modelColIdx } = findColumnIndices(rows);
+  const { dummyColIdx, barcodeColIdx, partCodeColIdx, modelColIdx, boxColIdx } = findColumnIndices(rows);
 
   if (isFallback()) {
     memoryDb.tables.panels = memoryDb.tables.panels.filter(p => p.lot_id !== lotId);
@@ -898,6 +961,7 @@ const syncExcelPanels = async (lotId, sheets) => {
     const rawBarcode = barcodeColIdx !== -1 ? String(row[barcodeColIdx] || '').trim() : '';
     const partCode = partCodeColIdx !== -1 ? String(row[partCodeColIdx] || '').trim() : '';
     const model = modelColIdx !== -1 ? String(row[modelColIdx] || '').trim() : '';
+    const box = boxColIdx !== -1 && row[boxColIdx] ? String(row[boxColIdx]).trim() : 'Box 1';
 
     if (r < 5) {
       const isHeader = [dummy, rawBarcode].some(val => {
@@ -932,7 +996,7 @@ const syncExcelPanels = async (lotId, sheets) => {
         dummy_sr_no: dummy,
         real_sr_no: hasRealBarcode ? rawBarcode : '',
         barcode: barcode,
-        box_no: 'Box 1',
+        box_no: box,
         mfg_year: mfgYear,
         part_code: partCode,
         model: model,
@@ -944,10 +1008,12 @@ const syncExcelPanels = async (lotId, sheets) => {
     } else {
       await pool.query(`
         INSERT INTO panels (lot_id, sr_no, dummy_sr_no, real_sr_no, barcode, box_no, mfg_year, part_code, model, status, scrap_reason, excel_data, current_step)
-        VALUES ($1, $2, $3, $4, $5, 'Box 1', $6, $7, $8, $9, $10, $11, 1)
-      `, [lotId, r + 1, dummy, hasRealBarcode ? rawBarcode : '', barcode, mfgYear, partCode, model, status, scrapReason, JSON.stringify(excelData)]);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, 1)
+      `, [lotId, r + 1, dummy, hasRealBarcode ? rawBarcode : '', barcode, box, mfgYear, partCode, model, status, scrapReason, JSON.stringify(excelData)]);
     }
   }
+
+  await initializeLotBaselines(lotId);
 };
 
 export const uploadExcel = async (req, res) => {
@@ -1361,6 +1427,8 @@ export const saveCellEdit = async (req, res) => {
       }
     }
 
+    await initializeLotBaselines(lotId);
+
     res.json({ success: true, message: "Cell edit saved successfully." });
   } catch (err) {
     console.error(err);
@@ -1613,261 +1681,14 @@ export const exportExcel = async (req, res) => {
     // 9. Run ExcelJS native export
     const pyOutputPath = path.join(process.cwd(), 'uploads', filename);
 
-    const workbook = new ExcelJS.Workbook();
-
-    const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
-    const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
-    const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
-
-    for (const sheetName of Object.keys(processedSheets)) {
-      const rows = processedSheets[sheetName] || [];
-      if (rows.length === 0) continue;
-
-      const worksheet = workbook.addWorksheet(sheetName);
-
-      const header = (rows[0] || []).map(h => String(h || '').toLowerCase().trim());
-      let dummyColIdx = -1;
-      let barcodeColIdx = -1;
-      for (let i = 0; i < header.length; i++) {
-        const val = header[i];
-        if (val.includes('pcb sr no') || val.includes('pcb serial') || val.includes('dummy') || val.includes('sr no') || val.includes('sr_no')) {
-          if (dummyColIdx === -1) dummyColIdx = i;
-        }
-        if (val.includes('barcode') || val.includes('actual serial') || val.includes('real serial')) {
-          if (barcodeColIdx === -1) barcodeColIdx = i;
-        }
-      }
-
-      const insertPos = dummyColIdx !== -1 ? dummyColIdx + 1 : 1;
-      const sheetEdits = cellEdits.filter(e => e.sheet_name === sheetName);
-
-      const originalHeader = [...rows[0]];
-      sheetEdits.forEach(edit => {
-        if (Number(edit.row_idx) === 0) {
-          const cIdx = Number(edit.col_idx);
-          if (!isNaN(cIdx) && cIdx >= 0 && cIdx < originalHeader.length) {
-            originalHeader[cIdx] = edit.value;
-          }
-        }
-      });
-
-      const virtualHeaders = ["Actual Serial No", "Length of Actual Serial No", "Mfg Year", "Action"];
-      const finalHeader = [...originalHeader];
-      virtualHeaders.forEach((vH, index) => {
-        finalHeader.splice(insertPos + index, 0, vH);
-      });
-
-      const headerRow = worksheet.addRow(finalHeader);
-      headerRow.height = 25;
-
-      for (let rIdx = 1; rIdx < rows.length; rIdx++) {
-        const originalRow = [...rows[rIdx]];
-
-        sheetEdits.forEach(edit => {
-          if (Number(edit.row_idx) === rIdx) {
-            const cIdx = Number(edit.col_idx);
-            if (!isNaN(cIdx) && cIdx >= 0 && cIdx < originalRow.length) {
-              originalRow[cIdx] = edit.value;
-            }
-          }
-        });
-
-        let actualBarcode = '';
-        const barcodeEdit = sheetEdits.find(e => Number(e.row_idx) === rIdx && String(e.col_idx) === 'actual_serial_no');
-        if (barcodeEdit) {
-          actualBarcode = barcodeEdit.value;
-        } else if (barcodeColIdx !== -1 && barcodeColIdx < originalRow.length) {
-          actualBarcode = originalRow[barcodeColIdx];
-        }
-
-        actualBarcode = String(actualBarcode || '').trim();
-        if (actualBarcode === '-') actualBarcode = '';
-
-        const barcodeLength = actualBarcode ? actualBarcode.length : 0;
-        const calculatedYear = extractMfgYear(actualBarcode);
-
-        let repairableVal = 'No';
-        const repairableEdit = sheetEdits.find(e => Number(e.row_idx) === rIdx && String(e.col_idx) === 'repairable');
-        if (repairableEdit) {
-          repairableVal = repairableEdit.value === 'true' ? 'Yes' : 'No';
-        }
-
-        let actionVal = !actualBarcode ? 'Pending' : '-';
-        if (calculatedYear) {
-          if (calculatedYear <= scrapYear) {
-            actionVal = 'Scrap';
-          } else if (lot && lot.separate_year_threshold !== null && calculatedYear === sepYear) {
-            actionVal = 'Separate';
-          } else if (calculatedYear >= chkYear) {
-            actionVal = (repairableVal === 'Yes') ? 'Repairable' : 'Non-Repairable';
-          }
-        }
-
-        const yearDisplay = calculatedYear ? String(calculatedYear) : '';
-
-        const finalRowData = [...originalRow];
-        const virtualValues = [actualBarcode, barcodeLength, yearDisplay, actionVal];
-        virtualValues.forEach((val, index) => {
-          finalRowData.splice(insertPos + index, 0, val);
-        });
-
-        const dataRow = worksheet.addRow(finalRowData);
-        dataRow.height = 20;
-      }
-
-      worksheet.views = [{ showGridLines: true }];
-
-      const headerFill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF1F4E78' }
-      };
-      const headerFont = {
-        name: 'Arial',
-        size: 10,
-        bold: true,
-        color: { argb: 'FFFFFFFF' }
-      };
-
-      const virtualFill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFD9E1F2' }
-      };
-      const virtualFont = {
-        name: 'Arial',
-        size: 10,
-        bold: true,
-        color: { argb: 'FF1F4E78' }
-      };
-
-      const normalFont = {
-        name: 'Arial',
-        size: 10
-      };
-
-      const borderStyle = {
-        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
-      };
-
-      for (let colIdx = 1; colIdx <= finalHeader.length; colIdx++) {
-        const cell = worksheet.getCell(1, colIdx);
-        const cellVal = String(cell.value || '');
-        if (virtualHeaders.includes(cellVal)) {
-          cell.fill = virtualFill;
-          cell.font = virtualFont;
-        } else {
-          cell.fill = headerFill;
-          cell.font = headerFont;
-        }
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = borderStyle;
-      }
-
-      for (let r = 2; r <= worksheet.rowCount; r++) {
-        for (let colIdx = 1; colIdx <= finalHeader.length; colIdx++) {
-          const cell = worksheet.getCell(r, colIdx);
-          cell.font = normalFont;
-          cell.border = borderStyle;
-
-          const cellVal = String(cell.value || '');
-          if (/^\d+$/.test(cellVal)) {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.value = Number(cellVal);
-          } else {
-            cell.alignment = { horizontal: 'left', vertical: 'middle' };
-          }
-        }
-      }
-
-      worksheet.columns.forEach(column => {
-        let maxLen = 0;
-        column.eachCell({ includeEmpty: true }, cell => {
-          const val = String(cell.value || '');
-          if (val) maxLen = Math.max(maxLen, val.length);
-        });
-        column.width = Math.max(maxLen + 4, 12);
-      });
-    }
-
-    if (exportHistory && exportHistory.length > 0) {
-      const historySheet = workbook.addWorksheet("Export History");
-      historySheet.views = [{ showGridLines: true }];
-
-      const historyHeaders = ["Export Number", "Timestamp", "PCBs Scanned", "Who Exported"];
-      const headerRow = historySheet.addRow(historyHeaders);
-      headerRow.height = 25;
-
-      const headerFill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FF1F4E78' }
-      };
-      const headerFont = {
-        name: 'Arial',
-        size: 10,
-        bold: true,
-        color: { argb: 'FFFFFFFF' }
-      };
-      const normalFont = {
-        name: 'Arial',
-        size: 10
-      };
-      const borderStyle = {
-        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
-      };
-
-      for (let colIdx = 1; colIdx <= historyHeaders.length; colIdx++) {
-        const cell = historySheet.getCell(1, colIdx);
-        cell.fill = headerFill;
-        cell.font = headerFont;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = borderStyle;
-      }
-
-      exportHistory.forEach(hist => {
-        const rowData = [
-          hist.export_number,
-          hist.timestamp,
-          hist.scanned_count,
-          hist.exported_by || 'Unknown'
-        ];
-        const dataRow = historySheet.addRow(rowData);
-        dataRow.height = 20;
-
-        for (let colIdx = 1; colIdx <= historyHeaders.length; colIdx++) {
-          const cell = historySheet.getCell(dataRow.number, colIdx);
-          cell.font = normalFont;
-          cell.border = borderStyle;
-          const cellVal = String(cell.value || '');
-          if (/^\d+$/.test(cellVal)) {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.value = Number(cellVal);
-          } else {
-            cell.alignment = { horizontal: 'left', vertical: 'middle' };
-          }
-        }
-      });
-
-      historySheet.columns.forEach(column => {
-        let maxLen = 0;
-        column.eachCell({ includeEmpty: true }, cell => {
-          const val = String(cell.value || '');
-          if (val) maxLen = Math.max(maxLen, val.length);
-        });
-        column.width = Math.max(maxLen + 4, 12);
-      });
-    }
-
-    // 10. Append Physical Audit Checkpoint sheets if completed
+    // Fetch Audit checkpoint details if completed
     const results6 = await Audit.getResults(lotId, 6);
     const results10 = await Audit.getResults(lotId, 10);
+
+    let mismatches6 = [];
+    let mismatches10 = [];
+    let allMissing = [];
+    let allMismatches = [];
 
     if (results6 || results10) {
       // Helper function to dynamically compute mismatches
@@ -1876,7 +1697,7 @@ export const exportExcel = async (req, res) => {
         const scans = await Audit.getScans(lId, stepNo);
         let allPanels = [];
         if (isFallback()) {
-          allPanels = (tables.panels || []).filter(p => p.lot_id === lId);
+          allPanels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lId);
         } else {
           const panelRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1', [lId]);
           allPanels = panelRes.rows;
@@ -1885,19 +1706,19 @@ export const exportExcel = async (req, res) => {
 
         let panelLogs = [];
         if (isFallback()) {
-          panelLogs = (tables.panel_logs || []).filter(log => {
+          panelLogs = (memoryDb.tables.panel_logs || []).filter(log => {
             const p = panelMap.get(log.panel_id);
             if (!p) return false;
-            const stepObj = (tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+            const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
             const stepNoVal = stepObj ? stepObj.step_no : null;
             return inScopeSteps.includes(stepNoVal);
           }).map(log => {
-            const stepObj = (tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+            const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
             return {
               ...log,
               step_no: stepObj ? stepObj.step_no : null,
               step_name: stepObj ? stepObj.name : 'Unknown',
-              engineer_name: (tables.users || []).find(u => u.id === log.engineer_id)?.name || 'Unknown'
+              engineer_name: (memoryDb.tables.users || []).find(u => u.id === log.engineer_id)?.name || 'Unknown'
             };
           });
         } else {
@@ -1936,7 +1757,7 @@ export const exportExcel = async (req, res) => {
 
         let stepsList = [];
         if (isFallback()) {
-          stepsList = (tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
+          stepsList = (memoryDb.tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
         } else {
           const stepsRes = await pool.query('SELECT * FROM repair_steps WHERE step_no = ANY($1) ORDER BY step_no', [inScopeSteps]);
           stepsList = stepsRes.rows;
@@ -1986,181 +1807,30 @@ export const exportExcel = async (req, res) => {
         return mismatchesList;
       };
 
-      const mismatches6 = await computeMismatchesForExcel(lotId, 6);
-      const mismatches10 = await computeMismatchesForExcel(lotId, 10);
-      const allMismatches = [
+      mismatches6 = await computeMismatchesForExcel(lotId, 6);
+      mismatches10 = await computeMismatchesForExcel(lotId, 10);
+      allMismatches = [
         ...mismatches6.map(m => ({ ...m, step: 6 })),
         ...mismatches10.map(m => ({ ...m, step: 10 }))
       ];
 
-      // Fetch missing list
       const missing6 = await Audit.getMissing(lotId, 6);
       const missing10 = await Audit.getMissing(lotId, 10);
-      const allMissing = [...missing6, ...missing10];
-
-      // Sheet 1: 🔴 Missing PCBs
-      const missingSheet = workbook.addWorksheet("🔴 Missing PCBs");
-      missingSheet.views = [{ showGridLines: true }];
-
-      const missingHeaders = [
-        "PCB Sr No", "Actual Serial No", "Part Code", "Model", "Mfg Year", 
-        "Action", "Last Step Logged", "Logged By", "Last Logged At", 
-        "Checkpoint Where Missing", "Missing Type", "Delta Context",
-        "Resolution Action", "Resolution Note", "Resolved By", "Resolved At"
-      ];
-      const headerRow = missingSheet.addRow(missingHeaders);
-      headerRow.height = 25;
-
-      const borderStyle = {
-        top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        bottom: { style: 'thin', color: { argb: 'FFD9D9D9' } },
-        right: { style: 'thin', color: { argb: 'FFD9D9D9' } }
-      };
-
-      const redHeaderFill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFC00000' }
-      };
-      const whiteHeaderFont = {
-        name: 'Arial',
-        size: 10,
-        bold: true,
-        color: { argb: 'FFFFFFFF' }
-      };
-
-      for (let colIdx = 1; colIdx <= missingHeaders.length; colIdx++) {
-        const cell = missingSheet.getCell(1, colIdx);
-        cell.fill = redHeaderFill;
-        cell.font = whiteHeaderFont;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = borderStyle;
-      }
-
-      // Add missing rows
-      allMissing.forEach(m => {
-        // Compute delta context string if mismatch exists
-        const stepMismatches = m.checkpoint_step === 6 ? mismatches6 : mismatches10;
-        const mismatch = stepMismatches.find(mis => mis.part_code === m.part_code);
-        let deltaContext = '';
-        if (mismatch) {
-          deltaContext = `Part code ${m.part_code}: ${mismatch.expected} expected at Step ${m.checkpoint_step}, only ${mismatch.scanned} scanned — ${mismatch.delta} missing`;
-        }
-
-        const rowData = [
-          m.pcb_sr_no || '-',
-          m.barcode || '-',
-          m.part_code || '-',
-          m.model || '-',
-          m.mfg_year || '-',
-          m.action || '-',
-          m.last_step_name || 'N/A',
-          m.last_logged_by_name || 'N/A',
-          m.last_logged_at ? formatLocalTime(m.last_logged_at) : 'N/A',
-          `Step ${m.checkpoint_step}`,
-          m.missing_type,
-          deltaContext,
-          m.resolution_action || 'Unresolved',
-          m.resolution_note || '-',
-          m.resolved_by_name || '-',
-          m.resolved_at ? formatLocalTime(m.resolved_at) : '-'
-        ];
-
-        const dataRow = missingSheet.addRow(rowData);
-        dataRow.height = 22;
-
-        const isNeverTouched = m.missing_type === 'Never touched';
-        const isResolved = !!m.resolution_action;
-
-        // Styling based on missing type and resolution status
-        const rowBgColor = isResolved ? 'FFC6EFCE' : (isNeverTouched ? 'FFFFC7CE' : 'FFFFEB9C'); // Green vs Light Red vs Light Amber
-        const rowFontColor = isResolved ? 'FF006100' : (isNeverTouched ? 'FF9C0006' : 'FF9C6500'); // Dark Green vs Dark Red vs Dark Amber
-
-        for (let colIdx = 1; colIdx <= missingHeaders.length; colIdx++) {
-          const cell = missingSheet.getCell(dataRow.number, colIdx);
-          cell.font = { name: 'Arial', size: 10, color: { argb: rowFontColor } };
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: rowBgColor } };
-          cell.border = borderStyle;
-          cell.alignment = { horizontal: 'left', vertical: 'middle' };
-        }
-      });
-
-      // Auto fit columns
-      missingSheet.columns.forEach(column => {
-        let maxLen = 0;
-        column.eachCell({ includeEmpty: true }, cell => {
-          const val = String(cell.value || '');
-          if (val) maxLen = Math.max(maxLen, val.length);
-        });
-        column.width = Math.max(maxLen + 4, 12);
-      });
-
-      // Sheet 2: ⚠️ Count Mismatch
-      const mismatchSheet = workbook.addWorksheet("⚠️ Count Mismatch");
-      mismatchSheet.views = [{ showGridLines: true }];
-
-      const mismatchHeaders = [
-        "Checkpoint", "Part Code", "Step-by-step breakdown", 
-        "Total expected at checkpoint", "Total scanned at checkpoint", "Delta", 
-        "First step where count dropped"
-      ];
-      const misHeaderRow = mismatchSheet.addRow(mismatchHeaders);
-      misHeaderRow.height = 25;
-
-      const orangeHeaderFill = {
-        type: 'pattern',
-        pattern: 'solid',
-        fgColor: { argb: 'FFE26B0A' } // Premium Orange
-      };
-
-      for (let colIdx = 1; colIdx <= mismatchHeaders.length; colIdx++) {
-        const cell = mismatchSheet.getCell(1, colIdx);
-        cell.fill = orangeHeaderFill;
-        cell.font = whiteHeaderFont;
-        cell.alignment = { horizontal: 'center', vertical: 'middle' };
-        cell.border = borderStyle;
-      }
-
-      // Add mismatch rows
-      allMismatches.forEach(m => {
-        const rowData = [
-          `Step ${m.step}`,
-          m.part_code,
-          m.steps_breakdown,
-          m.expected,
-          m.scanned,
-          m.delta,
-          m.first_step_dropped
-        ];
-
-        const dataRow = mismatchSheet.addRow(rowData);
-        dataRow.height = 20;
-
-        for (let colIdx = 1; colIdx <= mismatchHeaders.length; colIdx++) {
-          const cell = mismatchSheet.getCell(dataRow.number, colIdx);
-          cell.font = { name: 'Arial', size: 10 };
-          cell.border = borderStyle;
-          const cellVal = String(cell.value || '');
-          if (/^-?\d+$/.test(cellVal)) {
-            cell.alignment = { horizontal: 'right', vertical: 'middle' };
-            cell.value = Number(cellVal);
-          } else {
-            cell.alignment = { horizontal: 'left', vertical: 'middle' };
-          }
-        }
-      });
-
-      // Auto fit columns
-      mismatchSheet.columns.forEach(column => {
-        let maxLen = 0;
-        column.eachCell({ includeEmpty: true }, cell => {
-          const val = String(cell.value || '');
-          if (val) maxLen = Math.max(maxLen, val.length);
-        });
-        column.width = Math.max(maxLen + 4, 12);
-      });
+      allMissing = [...missing6, ...missing10];
     }
+
+    const workbook = await buildExportWorkbook(
+      lotId,
+      rawSheets,
+      lot,
+      cellEdits,
+      scanLogs,
+      allMissing,
+      mismatches6,
+      mismatches10,
+      allMismatches,
+      exportHistory
+    );
 
     await workbook.xlsx.writeFile(pyOutputPath);
 
@@ -2225,6 +1895,9 @@ export const saveLotStatus = async (req, res) => {
     }
 
     const updated = await Lot.updateStatus(lotId, status);
+    if (status === 'Active') {
+      await initializeLotBaselines(lotId);
+    }
     res.json(updated);
   } catch (err) {
     console.error('Error saving lot status:', err);
