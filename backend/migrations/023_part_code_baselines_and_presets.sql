@@ -15,16 +15,43 @@ CREATE TABLE IF NOT EXISTS lot_part_code_baselines (
   UNIQUE(lot_id, part_code)
 );
 
--- Seed Atomberg (client_id = 2) part codes presets
-INSERT INTO client_part_codes (client_id, part_code, name) VALUES
-(2, 'SA0019', 'PCB GV2_CFEfficio'),
-(2, 'SA0021', 'GV2 Main PCB 1200mm Reg_28W'),
-(2, 'SA0022', 'GV2 Main PCB 1400mm Reg 35W'),
-(2, 'SA0011', 'PCB GV3 Digital Renesat'),
-(2, 'SA0010', 'GV3 Smart Digital 1200mm'),
-(2, 'SA0061', 'GV3 Power PCB White'),
-(2, 'SA0060', 'GV3 Power PCB Black'),
-(2, 'SA0039', 'GV4 Studio+ Remote 1200mm'),
-(2, 'SA0038', 'GV4 Alpha PCB_Regulator_1200mm'),
-(2, 'SA0087', 'GV4 Ozeo PCB_Main_1200mm')
+-- Seed Atomberg part codes presets by matching name
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0019', 'PCB GV2_CFEfficio' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0021', 'GV2 Main PCB 1200mm Reg_28W' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0022', 'GV2 Main PCB 1400mm Reg 35W' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0011', 'PCB GV3 Digital Renesat' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0010', 'GV3 Smart Digital 1200mm' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0061', 'GV3 Power PCB White' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0060', 'GV3 Power PCB Black' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0039', 'GV4 Studio+ Remote 1200mm' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0038', 'GV4 Alpha PCB_Regulator_1200mm' FROM clients WHERE name ILIKE '%Atomberg%'
+ON CONFLICT (client_id, part_code) DO NOTHING;
+
+INSERT INTO client_part_codes (client_id, part_code, name)
+SELECT id, 'SA0087', 'GV4 Ozeo PCB_Main_1200mm' FROM clients WHERE name ILIKE '%Atomberg%'
 ON CONFLICT (client_id, part_code) DO NOTHING;
