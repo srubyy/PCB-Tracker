@@ -1054,6 +1054,23 @@ export const uploadExcel = async (req, res) => {
       fs.writeFileSync(finalJsonPath, JSON.stringify(sheets), 'utf8');
 
       if (isFallback()) {
+        memoryDb.tables.lot_raw_sheets = memoryDb.tables.lot_raw_sheets || [];
+        const existingIdx = memoryDb.tables.lot_raw_sheets.findIndex(s => s.lot_id === lotId);
+        if (existingIdx !== -1) {
+          memoryDb.tables.lot_raw_sheets[existingIdx].raw_json = JSON.stringify(sheets);
+        } else {
+          memoryDb.tables.lot_raw_sheets.push({ lot_id: lotId, raw_json: JSON.stringify(sheets) });
+        }
+      } else {
+        await pool.query(`
+          INSERT INTO lot_raw_sheets (lot_id, raw_json)
+          VALUES ($1, $2)
+          ON CONFLICT (lot_id)
+          DO UPDATE SET raw_json = $2
+        `, [lotId, JSON.stringify(sheets)]);
+      }
+
+      if (isFallback()) {
         memoryDb.tables.cell_edits = memoryDb.tables.cell_edits.filter(e => e.lot_id !== lotId);
       } else {
         await pool.query('DELETE FROM cell_edits WHERE lot_id = $1', [lotId]);
@@ -1446,11 +1463,26 @@ export const exportExcel = async (req, res) => {
 
   try {
     const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
-    if (!fs.existsSync(finalJsonPath)) {
-      return res.status(400).json({ error: "No spreadsheet uploaded for this lot yet." });
+    let rawSheets = null;
+    if (fs.existsSync(finalJsonPath)) {
+      rawSheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
+    } else {
+      if (isFallback()) {
+        const entry = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId);
+        if (entry) {
+          rawSheets = JSON.parse(entry.raw_json);
+        }
+      } else {
+        const dbRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1', [lotId]);
+        if (dbRes.rows.length > 0) {
+          rawSheets = JSON.parse(dbRes.rows[0].raw_json);
+        }
+      }
     }
 
-    const rawSheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
+    if (!rawSheets) {
+      return res.status(400).json({ error: "No spreadsheet uploaded for this lot yet." });
+    }
 
     // 1. Fetch Lot Info
     let lot = null;

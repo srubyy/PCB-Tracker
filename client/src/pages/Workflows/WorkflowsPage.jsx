@@ -853,18 +853,20 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
               </h2>
 
               <form onSubmit={handleProductionLogSubmit}>
-                <div className="form-group" style={{ marginBottom: 16 }}>
-                  <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 6 }}>PCB Product Type</label>
-                  <select
-                    value={productionPcbType}
-                    onChange={e => setProductionPcbType(e.target.value)}
-                    style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
-                  >
-                    {getDropdownOptions().map(opt => (
-                      <option key={opt.value} value={opt.value}>{opt.label}</option>
-                    ))}
-                  </select>
-                </div>
+                {selectedProductionStep !== 1 && (
+                  <div className="form-group" style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 6 }}>PCB Product Type</label>
+                    <select
+                      value={productionPcbType}
+                      onChange={e => setProductionPcbType(e.target.value)}
+                      style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
+                    >
+                      {getDropdownOptions().map(opt => (
+                        <option key={opt.value} value={opt.value}>{opt.label}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 <CapIndicatorCard />
                 {selectedProductionStep === 1 && (

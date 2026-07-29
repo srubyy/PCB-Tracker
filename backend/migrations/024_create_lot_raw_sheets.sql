@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS lot_raw_sheets (
+  lot_id INTEGER PRIMARY KEY REFERENCES lots(id) ON DELETE CASCADE,
+  raw_json TEXT NOT NULL
+);
