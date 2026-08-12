@@ -1312,11 +1312,21 @@ export const saveCellEdit = async (req, res) => {
       }
     }
 
+    let sheets = null;
     const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
     if (fs.existsSync(finalJsonPath)) {
-      const sheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
+      try { sheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8')); } catch (e) {}
+    }
+    if (!sheets && !isFallback()) {
+      const rawRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1', [lotId]);
+      if (rawRes.rows.length > 0 && rawRes.rows[0].raw_json) {
+        try { sheets = JSON.parse(rawRes.rows[0].raw_json); } catch (e) {}
+      }
+    }
+
+    if (sheets) {
       const rows = sheets[sheet_name] || [];
-      const { dummyColIdx, barcodeColIdx, partCodeColIdx, modelColIdx } = findColumnIndices(rows);
+      const { dummyColIdx, barcodeColIdx, mfgYearColIdx, partCodeColIdx, modelColIdx } = findColumnIndices(rows);
       const srNo = parseInt(row_idx, 10) + 1;
 
       let updateField = null;
@@ -1341,14 +1351,32 @@ export const saveCellEdit = async (req, res) => {
         const fields = { [updateField]: updateValue };
         if (updateField === 'real_sr_no') {
           fields.barcode = updateValue;
-          const mfgYear = extractMfgYear(updateValue);
+          const rawYearVal = mfgYearColIdx !== -1 && rows[row_idx] ? String(rows[row_idx][mfgYearColIdx] || '').trim() : '';
+          const parsedMfgYear = rawYearVal ? parseInt(rawYearVal, 10) : null;
+          const mfgYear = extractMfgYear(updateValue) || (!isNaN(parsedMfgYear) && parsedMfgYear >= 2000 && parsedMfgYear <= 2050 ? parsedMfgYear : null);
           fields.mfg_year = mfgYear;
-          if (mfgYear && mfgYear <= 2022) {
-            fields.status = 'Scrap';
-            fields.scrap_reason = `Manufacturing Year (${mfgYear}) <= 2022`;
-          } else {
-            fields.status = 'Repairable';
-            fields.scrap_reason = null;
+
+          let scrapYear = 2021;
+          let sepYear = 2022;
+          if (!isFallback()) {
+            const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+            if (lotRes.rows.length > 0) {
+              if (lotRes.rows[0].scrap_year_threshold !== null && lotRes.rows[0].scrap_year_threshold !== undefined) scrapYear = lotRes.rows[0].scrap_year_threshold;
+              if (lotRes.rows[0].separate_year_threshold !== null && lotRes.rows[0].separate_year_threshold !== undefined) sepYear = lotRes.rows[0].separate_year_threshold;
+            }
+          }
+
+          if (mfgYear) {
+            if (mfgYear <= scrapYear) {
+              fields.status = 'Scrap';
+              fields.scrap_reason = `Manufacturing Year (${mfgYear}) <= ${scrapYear}`;
+            } else if (sepYear && mfgYear === sepYear) {
+              fields.status = 'Separate';
+              fields.scrap_reason = `Manufacturing Year (${mfgYear}) == ${sepYear}`;
+            } else {
+              fields.status = 'Repairable';
+              fields.scrap_reason = null;
+            }
           }
         }
 
@@ -1397,8 +1425,25 @@ export const saveCellEdit = async (req, res) => {
         }
       }
 
-      const mfgYear = extractMfgYear(actualSerialVal);
-      const scrapVal = mfgYear && mfgYear <= 2022 ? 'Yes' : 'No';
+      const rawYearVal = mfgYearColIdx !== -1 && rows[row_idx] ? String(rows[row_idx][mfgYearColIdx] || '').trim() : '';
+      const parsedMfgYear = rawYearVal ? parseInt(rawYearVal, 10) : null;
+      const mfgYear = extractMfgYear(actualSerialVal) || (!isNaN(parsedMfgYear) && parsedMfgYear >= 2000 && parsedMfgYear <= 2050 ? parsedMfgYear : null);
+
+      let scrapYear = 2021;
+      let sepYear = 2022;
+      if (!isFallback()) {
+        const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+        if (lotRes.rows.length > 0) {
+          if (lotRes.rows[0].scrap_year_threshold !== null && lotRes.rows[0].scrap_year_threshold !== undefined) scrapYear = lotRes.rows[0].scrap_year_threshold;
+          if (lotRes.rows[0].separate_year_threshold !== null && lotRes.rows[0].separate_year_threshold !== undefined) sepYear = lotRes.rows[0].separate_year_threshold;
+        }
+      }
+
+      let scrapVal = 'No';
+      if (mfgYear) {
+        if (mfgYear <= scrapYear) scrapVal = 'Yes (Scrap)';
+        else if (sepYear && mfgYear === sepYear) scrapVal = 'Yes (Separate)';
+      }
 
       // Check if a scan log already exists for this row
       let existingLog = null;
