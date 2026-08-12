@@ -219,13 +219,19 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
 
   const getDynamicCapForStepAndPcbType = (stepNo) => {
     if (!lotProductionStats || !productionPcbType) return 0;
-    const partCode = productionPcbType.split(' - ')[0].trim();
+    const targetSa = (String(productionPcbType).match(/SA\d+/i) || [])[0]?.toUpperCase() || productionPcbType.split(' - ')[0].trim();
+
     if (stepNo === 2) {
       if (!lotProductionStats.part_code_counts) return 0;
-      return lotProductionStats.part_code_counts[partCode] || 0;
+      const matchingKey = Object.keys(lotProductionStats.part_code_counts).find(k => (String(k).match(/SA\d+/i) || [])[0]?.toUpperCase() === targetSa);
+      return matchingKey ? (lotProductionStats.part_code_counts[matchingKey] || 0) : 0;
     }
-    if (lotProductionStats.part_code_caps && lotProductionStats.part_code_caps[partCode]) {
-      return lotProductionStats.part_code_caps[partCode][stepNo] ?? 0;
+
+    if (lotProductionStats.part_code_caps) {
+      const matchingKey = Object.keys(lotProductionStats.part_code_caps).find(k => (String(k).match(/SA\d+/i) || [])[0]?.toUpperCase() === targetSa);
+      if (matchingKey && lotProductionStats.part_code_caps[matchingKey]) {
+        return lotProductionStats.part_code_caps[matchingKey][stepNo] ?? 0;
+      }
     }
     return 0;
   };

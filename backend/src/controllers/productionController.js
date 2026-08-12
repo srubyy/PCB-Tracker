@@ -182,7 +182,8 @@ const getStep10AuditLimit = async (lotId, partCode) => {
 };
 
 export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
-  const cleanPartCode = partCode.split(' - ')[0].trim();
+  const saMatch = String(partCode).match(/SA\d+/i);
+  const cleanPartCode = saMatch ? saMatch[0].toUpperCase() : partCode.split(' - ')[0].trim();
   const cleanLotId = parseInt(lotId, 10);
 
   if (stepNo === 2) {

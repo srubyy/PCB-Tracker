@@ -924,7 +924,7 @@ export const initializeLotBaselines = async (lotId, clientTransaction = null) =>
         AND p.part_code <> ''
         AND (p.mfg_year IS NULL OR (p.mfg_year > $2 AND p.mfg_year <> $3))
       GROUP BY p.lot_id, p.part_code
-      ON CONFLICT (lot_id, part_code) DO NOTHING
+      ON CONFLICT (lot_id, part_code) DO UPDATE SET verified_qty = EXCLUDED.verified_qty
     `, [lotId, scrapYear, sepYear]);
   }
 };
