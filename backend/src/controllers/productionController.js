@@ -200,23 +200,16 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-      console.log('DEBUG getPartCodeStepCap (Fallback):', {
-        lotId,
-        cleanLotId,
-        stepNo,
-        partCode,
-        cleanPartCode,
-        scrapYear,
-        sepYear
-      });
+      const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === cleanLotId);
+      const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
 
       const panels = memoryDb.tables.panels.filter(p => 
         p.lot_id === cleanLotId && 
         p.part_code === cleanPartCode &&
-        (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear))
+        (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear)) &&
+        (scannedDummyNos.size === 0 || scannedDummyNos.has(p.dummy_sr_no))
       );
 
-      console.log('DEBUG cap result (Fallback):', panels.length);
       return panels.length;
     } else {
       const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [cleanLotId]);
@@ -224,25 +217,34 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-      console.log('DEBUG getPartCodeStepCap:', {
-        lotId,
-        cleanLotId,
-        stepNo,
-        partCode,
-        cleanPartCode,
-        scrapYear,
-        sepYear
-      });
+      const scanCountRes = await pool.query('SELECT COUNT(*)::integer FROM scan_logs WHERE lot_id = $1', [cleanLotId]);
+      const hasScans = scanCountRes.rows[0].count > 0;
 
-      const res = await pool.query(`
-        SELECT COUNT(*)::integer 
-        FROM panels 
-        WHERE lot_id = $1 
-          AND part_code = $2 
-          AND (mfg_year IS NULL OR (mfg_year > $3 AND mfg_year <> $4))
-      `, [cleanLotId, cleanPartCode, scrapYear, sepYear]);
+      let queryStr = ``;
+      let queryParams = [];
 
-      console.log('DEBUG cap result:', res.rows[0].count);
+      if (hasScans) {
+        queryStr = `
+          SELECT COUNT(DISTINCT p.id)::integer 
+          FROM panels p
+          JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (sl.dummy_sr_no = p.dummy_sr_no OR sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no)
+          WHERE p.lot_id = $1 
+            AND p.part_code = $2 
+            AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $4))
+        `;
+        queryParams = [cleanLotId, cleanPartCode, scrapYear, sepYear];
+      } else {
+        queryStr = `
+          SELECT COUNT(*)::integer 
+          FROM panels 
+          WHERE lot_id = $1 
+            AND part_code = $2 
+            AND (mfg_year IS NULL OR (mfg_year > $3 AND mfg_year <> $4))
+        `;
+        queryParams = [cleanLotId, cleanPartCode, scrapYear, sepYear];
+      }
+
+      const res = await pool.query(queryStr, queryParams);
       return res.rows[0].count;
     }
   }
