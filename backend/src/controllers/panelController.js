@@ -905,22 +905,20 @@ export const initializeLotBaselines = async (lotId, clientTransaction = null) =>
 
     await db.query('DELETE FROM lot_part_code_baselines WHERE lot_id = $1 AND locked = false', [lotId]);
 
-    // Insert baselines per part code: use scanned repairable count if scans exist for that part code, otherwise total imported repairable count
+    // Insert baselines per part code: strictly count scanned/edited timestamped valid repairable panels
     await db.query(`
       INSERT INTO lot_part_code_baselines (lot_id, part_code, verified_qty, locked)
       SELECT 
         p.lot_id, 
         p.part_code, 
-        COALESCE(
-          NULLIF(
-            COUNT(DISTINCT CASE WHEN sl.id IS NOT NULL THEN p.id END)::integer, 
-            0
-          ), 
-          COUNT(DISTINCT p.id)::integer
-        ) AS verified_qty, 
+        COUNT(DISTINCT p.id)::integer AS verified_qty, 
         false
       FROM panels p
-      LEFT JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (sl.dummy_sr_no = p.dummy_sr_no OR sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no)
+      JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (
+        (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
+        (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
+        (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
+      )
       WHERE p.lot_id = $1 
         AND p.part_code IS NOT NULL 
         AND p.part_code <> ''

@@ -200,21 +200,15 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-      const partPanels = memoryDb.tables.panels.filter(p => 
-        p.lot_id === cleanLotId && 
-        (p.part_code === cleanPartCode || (p.part_code && p.part_code.includes(cleanPartCode)))
-      );
-      const partPanelIds = new Set(partPanels.map(p => p.id));
-      const partDummyNos = new Set(partPanels.map(p => p.dummy_sr_no).filter(Boolean));
-
-      const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => 
-        sl.lot_id === cleanLotId && (scannedDummyNos.has(sl.dummy_sr_no) || partDummyNos.has(sl.dummy_sr_no))
-      );
+      const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === cleanLotId);
+      const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx));
       const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
 
-      const panels = partPanels.filter(p => 
+      const panels = memoryDb.tables.panels.filter(p => 
+        p.lot_id === cleanLotId && 
+        (p.part_code === cleanPartCode || (p.part_code && p.part_code.includes(cleanPartCode))) &&
         (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear)) &&
-        (scannedDummyNos.size === 0 || scannedDummyNos.has(p.dummy_sr_no))
+        (scannedRowIndices.has(p.sr_no - 1) || scannedDummyNos.has(p.dummy_sr_no))
       );
 
       return panels.length;
@@ -224,40 +218,19 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-      // Check if scan_logs has entries for THIS SPECIFIC PART CODE
-      const scanCountRes = await pool.query(`
-        SELECT COUNT(DISTINCT sl.id)::integer 
-        FROM scan_logs sl 
-        JOIN panels p ON sl.lot_id = p.lot_id AND (sl.dummy_sr_no = p.dummy_sr_no OR sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no)
-        WHERE sl.lot_id = $1 AND (p.part_code = $2 OR p.part_code ILIKE '%' || $2 || '%')
-      `, [cleanLotId, cleanPartCode]);
-      const hasScansForPartCode = scanCountRes.rows[0].count > 0;
+      const res = await pool.query(`
+        SELECT COUNT(DISTINCT p.id)::integer 
+        FROM panels p
+        JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (
+          (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
+          (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
+          (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
+        )
+        WHERE p.lot_id = $1 
+          AND (p.part_code = $2 OR p.part_code ILIKE '%' || $2 || '%')
+          AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $4))
+      `, [cleanLotId, cleanPartCode, scrapYear, sepYear]);
 
-      let queryStr = ``;
-      let queryParams = [];
-
-      if (hasScansForPartCode) {
-        queryStr = `
-          SELECT COUNT(DISTINCT p.id)::integer 
-          FROM panels p
-          JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (sl.dummy_sr_no = p.dummy_sr_no OR sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no)
-          WHERE p.lot_id = $1 
-            AND (p.part_code = $2 OR p.part_code ILIKE '%' || $2 || '%')
-            AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $4))
-        `;
-        queryParams = [cleanLotId, cleanPartCode, scrapYear, sepYear];
-      } else {
-        queryStr = `
-          SELECT COUNT(*)::integer 
-          FROM panels p
-          WHERE p.lot_id = $1 
-            AND (p.part_code = $2 OR p.part_code ILIKE '%' || $2 || '%')
-            AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $4))
-        `;
-        queryParams = [cleanLotId, cleanPartCode, scrapYear, sepYear];
-      }
-
-      const res = await pool.query(queryStr, queryParams);
       return res.rows[0].count;
     }
   }
