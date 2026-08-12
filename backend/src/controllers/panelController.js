@@ -903,37 +903,31 @@ export const initializeLotBaselines = async (lotId, clientTransaction = null) =>
     const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
     const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-    const scanCountRes = await db.query('SELECT COUNT(*)::integer FROM scan_logs WHERE lot_id = $1', [lotId]);
-    const hasScans = scanCountRes.rows[0].count > 0;
-
     await db.query('DELETE FROM lot_part_code_baselines WHERE lot_id = $1 AND locked = false', [lotId]);
 
-    if (hasScans) {
-      await db.query(`
-        INSERT INTO lot_part_code_baselines (lot_id, part_code, verified_qty, locked)
-        SELECT p.lot_id, p.part_code, COUNT(DISTINCT p.id)::integer, false
-        FROM panels p
-        JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (sl.dummy_sr_no = p.dummy_sr_no OR sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no)
-        WHERE p.lot_id = $1 
-          AND p.part_code IS NOT NULL 
-          AND p.part_code <> ''
-          AND (p.mfg_year IS NULL OR (p.mfg_year > $2 AND p.mfg_year <> $3))
-        GROUP BY p.lot_id, p.part_code
-        ON CONFLICT (lot_id, part_code) DO NOTHING
-      `, [lotId, scrapYear, sepYear]);
-    } else {
-      await db.query(`
-        INSERT INTO lot_part_code_baselines (lot_id, part_code, verified_qty, locked)
-        SELECT lot_id, part_code, COUNT(*)::integer, false
-        FROM panels
-        WHERE lot_id = $1 
-          AND part_code IS NOT NULL 
-          AND part_code <> ''
-          AND (mfg_year IS NULL OR (mfg_year > $2 AND mfg_year <> $3))
-        GROUP BY lot_id, part_code
-        ON CONFLICT (lot_id, part_code) DO NOTHING
-      `, [lotId, scrapYear, sepYear]);
-    }
+    // Insert baselines per part code: use scanned repairable count if scans exist for that part code, otherwise total imported repairable count
+    await db.query(`
+      INSERT INTO lot_part_code_baselines (lot_id, part_code, verified_qty, locked)
+      SELECT 
+        p.lot_id, 
+        p.part_code, 
+        COALESCE(
+          NULLIF(
+            COUNT(DISTINCT CASE WHEN sl.id IS NOT NULL THEN p.id END)::integer, 
+            0
+          ), 
+          COUNT(DISTINCT p.id)::integer
+        ) AS verified_qty, 
+        false
+      FROM panels p
+      LEFT JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (sl.dummy_sr_no = p.dummy_sr_no OR sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no)
+      WHERE p.lot_id = $1 
+        AND p.part_code IS NOT NULL 
+        AND p.part_code <> ''
+        AND (p.mfg_year IS NULL OR (p.mfg_year > $2 AND p.mfg_year <> $3))
+      GROUP BY p.lot_id, p.part_code
+      ON CONFLICT (lot_id, part_code) DO NOTHING
+    `, [lotId, scrapYear, sepYear]);
   }
 };
 
