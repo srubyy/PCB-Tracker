@@ -104,7 +104,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
   };
 
   // Helper to get row validation status info
-  const getValidationInfo = (realSerial) => {
+  const getValidationInfo = (realSerial, overrideYear = null) => {
     if (!realSerial || realSerial === '-') {
       return {
         status: 'pending',
@@ -114,7 +114,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
         text: '⚠️ Pending'
       };
     }
-    const year = getMfgYear(realSerial);
+    const year = overrideYear || getMfgYear(realSerial);
     if (!year) {
       return {
         status: 'valid',
@@ -150,7 +150,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
       color: '#28a745',
       bg: 'rgba(40, 167, 69, 0.1)',
       border: 'rgba(40, 167, 69, 0.25)',
-      text: `✅ Valid (Mfg ${year})`
+      text: '✅ Valid'
     };
   };
 
@@ -686,8 +686,11 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                 const baseBarcode = getCellValue(activeSheetName, rIdx, barcodeColIdx, rawBarcode);
                 const actualBarcode = getCellValue(activeSheetName, rIdx, 'actual_serial_no', baseBarcode);
                 
-                const valInfo = getValidationInfo(actualBarcode);
-                const calculatedYear = getMfgYear(actualBarcode);
+                const rawMfgYearVal = mfgYearColIdx !== -1 ? row[mfgYearColIdx] : '';
+                const cellMfgYearVal = getCellValue(activeSheetName, rIdx, mfgYearColIdx, rawMfgYearVal);
+                const parsedCellYear = cellMfgYearVal ? parseInt(String(cellMfgYearVal).trim(), 10) : null;
+                const calculatedYear = getMfgYear(actualBarcode) || (!isNaN(parsedCellYear) && parsedCellYear >= 2000 && parsedCellYear <= 2050 ? parsedCellYear : null);
+                const valInfo = getValidationInfo(actualBarcode, calculatedYear);
                 const isHighlighted = activeRowIdx === rIdx;
 
                 return (

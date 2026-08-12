@@ -964,10 +964,24 @@ const syncExcelPanels = async (lotId, sheets) => {
   if (!targetSheetName) return;
 
   const rows = sheets[targetSheetName];
-  const { dummyColIdx, barcodeColIdx, partCodeColIdx, modelColIdx, boxColIdx } = findColumnIndices(rows);
+  const { dummyColIdx, barcodeColIdx, mfgYearColIdx, partCodeColIdx, modelColIdx, boxColIdx } = findColumnIndices(rows);
+
+  let scrapYear = 2021;
+  let sepYear = 2022;
+  if (isFallback()) {
+    const lot = memoryDb.tables.lots.find(l => l.id === lotId);
+    if (lot && lot.scrap_year_threshold !== null) scrapYear = lot.scrap_year_threshold;
+    if (lot && lot.separate_year_threshold !== null) sepYear = lot.separate_year_threshold;
+  } else {
+    const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+    if (lotRes.rows.length > 0) {
+      if (lotRes.rows[0].scrap_year_threshold !== null && lotRes.rows[0].scrap_year_threshold !== undefined) scrapYear = lotRes.rows[0].scrap_year_threshold;
+      if (lotRes.rows[0].separate_year_threshold !== null && lotRes.rows[0].separate_year_threshold !== undefined) sepYear = lotRes.rows[0].separate_year_threshold;
+    }
+  }
 
   if (isFallback()) {
-    memoryDb.tables.panels = memoryDb.tables.panels.filter(p => p.lot_id !== lotId);
+    memoryDb.tables.panels = memoryDb.tables.panels.filter(p => p.lot_id === lotId);
   } else {
     await pool.query('DELETE FROM panels WHERE lot_id = $1', [lotId]);
   }
@@ -992,12 +1006,20 @@ const syncExcelPanels = async (lotId, sheets) => {
 
     const hasRealBarcode = rawBarcode && rawBarcode !== '-';
     const barcode = hasRealBarcode ? rawBarcode : (dummy || `DUMMY-${lotId}-${r + 1}-${Date.now()}`);
-    const mfgYear = hasRealBarcode ? extractMfgYear(rawBarcode) : null;
+    const rawMfgYearVal = mfgYearColIdx !== -1 ? String(row[mfgYearColIdx] || '').trim() : '';
+    const parsedMfgYear = rawMfgYearVal ? parseInt(rawMfgYearVal, 10) : null;
+    const mfgYear = (hasRealBarcode ? extractMfgYear(rawBarcode) : null) || (!isNaN(parsedMfgYear) && parsedMfgYear >= 2000 && parsedMfgYear <= 2050 ? parsedMfgYear : null);
+
     let status = 'Repairable';
     let scrapReason = null;
-    if (mfgYear && mfgYear <= 2022) {
-      status = 'Scrap';
-      scrapReason = `Manufacturing Year (${mfgYear}) <= 2022`;
+    if (mfgYear) {
+      if (mfgYear <= scrapYear) {
+        status = 'Scrap';
+        scrapReason = `Manufacturing Year (${mfgYear}) <= ${scrapYear}`;
+      } else if (sepYear && mfgYear === sepYear) {
+        status = 'Separate';
+        scrapReason = `Manufacturing Year (${mfgYear}) == ${sepYear}`;
+      }
     }
 
     const excelData = {};
