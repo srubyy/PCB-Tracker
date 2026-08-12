@@ -1771,132 +1771,136 @@ export const exportExcel = async (req, res) => {
     let allMismatches = [];
 
     if (results6 || results10) {
-      // Helper function to dynamically compute mismatches
-      const computeMismatchesForExcel = async (lId, stepNo) => {
-        const inScopeSteps = stepNo === 6 ? [1, 2, 3, 4, 5] : [7, 8, 9];
-        const scans = await Audit.getScans(lId, stepNo);
-        let allPanels = [];
-        if (isFallback()) {
-          allPanels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lId);
-        } else {
-          const panelRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1', [lId]);
-          allPanels = panelRes.rows;
-        }
-        const panelMap = new Map(allPanels.map(p => [p.id, p]));
-
-        let panelLogs = [];
-        if (isFallback()) {
-          panelLogs = (memoryDb.tables.panel_logs || []).filter(log => {
-            const p = panelMap.get(log.panel_id);
-            if (!p) return false;
-            const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
-            const stepNoVal = stepObj ? stepObj.step_no : null;
-            return inScopeSteps.includes(stepNoVal);
-          }).map(log => {
-            const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
-            return {
-              ...log,
-              step_no: stepObj ? stepObj.step_no : null,
-              step_name: stepObj ? stepObj.name : 'Unknown',
-              engineer_name: (memoryDb.tables.users || []).find(u => u.id === log.engineer_id)?.name || 'Unknown'
-            };
-          });
-        } else {
-          const logRes = await pool.query(
-            `SELECT pl.*, rs.step_no, rs.name as step_name, u.name as engineer_name
-             FROM panel_logs pl
-             JOIN repair_steps rs ON pl.step_id = rs.id
-             LEFT JOIN users u ON pl.engineer_id = u.id
-             JOIN panels p ON pl.panel_id = p.id
-             WHERE p.lot_id = $1 AND rs.step_no = ANY($2)`,
-            [lId, inScopeSteps]
-          );
-          panelLogs = logRes.rows;
-        }
-
-        const partCodeExpectedMap = new Map();
-        const partCodeScannedMap = new Map();
-
-        panelLogs.forEach(l => {
-          const panel = panelMap.get(l.panel_id);
-          if (panel && panel.part_code) {
-            if (!partCodeExpectedMap.has(panel.part_code)) partCodeExpectedMap.set(panel.part_code, new Set());
-            partCodeExpectedMap.get(panel.part_code).add(l.panel_id);
+      try {
+        // Helper function to dynamically compute mismatches
+        const computeMismatchesForExcel = async (lId, stepNo) => {
+          const inScopeSteps = stepNo === 6 ? [1, 2, 3, 4, 5] : [7, 8, 9];
+          const scans = await Audit.getScans(lId, stepNo);
+          let allPanels = [];
+          if (isFallback()) {
+            allPanels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lId);
+          } else {
+            const panelRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1', [lId]);
+            allPanels = panelRes.rows;
           }
-        });
+          const panelMap = new Map(allPanels.map(p => [p.id, p]));
 
-        scans.forEach(s => {
-          if (!s.is_unknown && s.panel_id) {
-            const panel = panelMap.get(s.panel_id);
-            if (panel && panel.part_code) {
-              if (!partCodeScannedMap.has(panel.part_code)) partCodeScannedMap.set(panel.part_code, new Set());
-              partCodeScannedMap.get(panel.part_code).add(s.panel_id);
-            }
-          }
-        });
-
-        let stepsList = [];
-        if (isFallback()) {
-          stepsList = (memoryDb.tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
-        } else {
-          const stepsRes = await pool.query('SELECT * FROM repair_steps WHERE step_no = ANY($1) ORDER BY step_no', [inScopeSteps]);
-          stepsList = stepsRes.rows;
-        }
-
-        const mismatchesList = [];
-        const allPartCodes = new Set([...partCodeExpectedMap.keys(), ...partCodeScannedMap.keys()]);
-
-        for (const partCode of allPartCodes) {
-          const expected = (partCodeExpectedMap.get(partCode) || new Set()).size;
-          const scanned = (partCodeScannedMap.get(partCode) || new Set()).size;
-
-          if (expected !== scanned) {
-            const stepsBreakdown = [];
-            let firstStepDropped = null;
-            let lastStepCount = null;
-
-            for (const st of stepsList) {
-              const stepLogs = panelLogs.filter(l => {
-                const panel = panelMap.get(l.panel_id);
-                return panel && panel.part_code === partCode && l.step_no === st.step_no;
-              });
-              const stepCount = new Set(stepLogs.map(l => l.panel_id)).size;
-
-              const opsMap = {};
-              stepLogs.forEach(l => { opsMap[l.engineer_name] = (opsMap[l.engineer_name] || 0) + 1; });
-              const loggedByStr = Object.entries(opsMap).map(([name, c]) => `${name} (${c})`).join(', ') || 'No logs';
-
-              stepsBreakdown.push(`${st.name}: ${stepCount} logged by [${loggedByStr}]`);
-
-              if (lastStepCount !== null && stepCount < lastStepCount && !firstStepDropped) {
-                firstStepDropped = st.name;
-              }
-              lastStepCount = stepCount;
-            }
-
-            mismatchesList.push({
-              part_code: partCode,
-              expected,
-              scanned,
-              delta: expected - scanned,
-              steps_breakdown: stepsBreakdown.join(' | '),
-              first_step_dropped: firstStepDropped || 'N/A'
+          let panelLogs = [];
+          if (isFallback()) {
+            panelLogs = (memoryDb.tables.panel_logs || []).filter(log => {
+              const p = panelMap.get(log.panel_id);
+              if (!p) return false;
+              const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+              const stepNoVal = stepObj ? stepObj.step_no : null;
+              return inScopeSteps.includes(stepNoVal);
+            }).map(log => {
+              const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+              return {
+                ...log,
+                step_no: stepObj ? stepObj.step_no : null,
+                step_name: stepObj ? stepObj.name : 'Unknown',
+                engineer_name: (memoryDb.tables.users || []).find(u => u.id === log.engineer_id)?.name || 'Unknown'
+              };
             });
+          } else {
+            const logRes = await pool.query(
+              `SELECT pl.*, rs.step_no, rs.name as step_name, u.name as engineer_name
+               FROM panel_logs pl
+               JOIN repair_steps rs ON pl.step_id = rs.id
+               LEFT JOIN users u ON pl.engineer_id = u.id
+               JOIN panels p ON pl.panel_id = p.id
+               WHERE p.lot_id = $1 AND rs.step_no = ANY($2)`,
+              [lId, inScopeSteps]
+            );
+            panelLogs = logRes.rows;
           }
-        }
-        return mismatchesList;
-      };
 
-      mismatches6 = await computeMismatchesForExcel(lotId, 6);
-      mismatches10 = await computeMismatchesForExcel(lotId, 10);
-      allMismatches = [
-        ...mismatches6.map(m => ({ ...m, step: 6 })),
-        ...mismatches10.map(m => ({ ...m, step: 10 }))
-      ];
+          const partCodeExpectedMap = new Map();
+          const partCodeScannedMap = new Map();
 
-      const missing6 = await Audit.getMissing(lotId, 6);
-      const missing10 = await Audit.getMissing(lotId, 10);
-      allMissing = [...missing6, ...missing10];
+          panelLogs.forEach(l => {
+            const panel = panelMap.get(l.panel_id);
+            if (panel && panel.part_code) {
+              if (!partCodeExpectedMap.has(panel.part_code)) partCodeExpectedMap.set(panel.part_code, new Set());
+              partCodeExpectedMap.get(panel.part_code).add(l.panel_id);
+            }
+          });
+
+          scans.forEach(s => {
+            if (!s.is_unknown && s.panel_id) {
+              const panel = panelMap.get(s.panel_id);
+              if (panel && panel.part_code) {
+                if (!partCodeScannedMap.has(panel.part_code)) partCodeScannedMap.set(panel.part_code, new Set());
+                partCodeScannedMap.get(panel.part_code).add(s.panel_id);
+              }
+            }
+          });
+
+          let stepsList = [];
+          if (isFallback()) {
+            stepsList = (memoryDb.tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
+          } else {
+            const stepsRes = await pool.query('SELECT * FROM repair_steps WHERE step_no = ANY($1) ORDER BY step_no', [inScopeSteps]);
+            stepsList = stepsRes.rows;
+          }
+
+          const mismatchesList = [];
+          const allPartCodes = new Set([...partCodeExpectedMap.keys(), ...partCodeScannedMap.keys()]);
+
+          for (const partCode of allPartCodes) {
+            const expected = (partCodeExpectedMap.get(partCode) || new Set()).size;
+            const scanned = (partCodeScannedMap.get(partCode) || new Set()).size;
+
+            if (expected !== scanned) {
+              const stepsBreakdown = [];
+              let firstStepDropped = null;
+              let lastStepCount = null;
+
+              for (const st of stepsList) {
+                const stepLogs = panelLogs.filter(l => {
+                  const panel = panelMap.get(l.panel_id);
+                  return panel && panel.part_code === partCode && l.step_no === st.step_no;
+                });
+                const stepCount = new Set(stepLogs.map(l => l.panel_id)).size;
+
+                const opsMap = {};
+                stepLogs.forEach(l => { opsMap[l.engineer_name] = (opsMap[l.engineer_name] || 0) + 1; });
+                const loggedByStr = Object.entries(opsMap).map(([name, c]) => `${name} (${c})`).join(', ') || 'No logs';
+
+                stepsBreakdown.push(`${st.name}: ${stepCount} logged by [${loggedByStr}]`);
+
+                if (lastStepCount !== null && stepCount < lastStepCount && !firstStepDropped) {
+                  firstStepDropped = st.name;
+                }
+                lastStepCount = stepCount;
+              }
+
+              mismatchesList.push({
+                part_code: partCode,
+                expected,
+                scanned,
+                delta: expected - scanned,
+                steps_breakdown: stepsBreakdown.join(' | '),
+                first_step_dropped: firstStepDropped || 'N/A'
+              });
+            }
+          }
+          return mismatchesList;
+        };
+
+        mismatches6 = await computeMismatchesForExcel(lotId, 6);
+        mismatches10 = await computeMismatchesForExcel(lotId, 10);
+        allMismatches = [
+          ...mismatches6.map(m => ({ ...m, step: 6 })),
+          ...mismatches10.map(m => ({ ...m, step: 10 }))
+        ];
+
+        const missing6 = await Audit.getMissing(lotId, 6);
+        const missing10 = await Audit.getMissing(lotId, 10);
+        allMissing = [...missing6, ...missing10];
+      } catch (auditErr) {
+        console.error("Failed calculating audit mismatches, exporting without them:", auditErr);
+      }
     }
 
     const workbook = await buildExportWorkbook(
@@ -1918,8 +1922,12 @@ export const exportExcel = async (req, res) => {
     res.end();
 
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: "Internal server error during Excel export." });
+    console.error("EXCEL EXPORT DETECTED ERROR:", err);
+    res.status(500).json({
+      error: "Internal server error during Excel export.",
+      message: err.message,
+      stack: err.stack
+    });
   }
 };
 
