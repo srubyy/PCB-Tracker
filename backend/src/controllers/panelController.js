@@ -1253,16 +1253,35 @@ export const getExcelData = async (req, res) => {
     return processed;
   };
 
-  let finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
-  if (!fs.existsSync(finalJsonPath)) {
-    finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
-  }
   let sheets = {};
-  if (fs.existsSync(finalJsonPath)) {
-    try {
-      sheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
-    } catch (e) {
-      console.error(e);
+  try {
+    if (isFallback()) {
+      const sheetRec = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId || s.lot_id === rawLotId);
+      if (sheetRec && sheetRec.raw_json) {
+        sheets = typeof sheetRec.raw_json === 'string' ? JSON.parse(sheetRec.raw_json) : sheetRec.raw_json;
+      }
+    } else {
+      const sheetRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+      if (sheetRes.rows.length > 0 && sheetRes.rows[0].raw_json) {
+        const raw = sheetRes.rows[0].raw_json;
+        sheets = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching lot_raw_sheets:', err);
+  }
+
+  if (!sheets || Object.keys(sheets).length === 0) {
+    let finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+    if (!fs.existsSync(finalJsonPath)) {
+      finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
+    }
+    if (fs.existsSync(finalJsonPath)) {
+      try {
+        sheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
+      } catch (e) {
+        console.error(e);
+      }
     }
   }
 
