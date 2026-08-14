@@ -1255,65 +1255,69 @@ export const getExcelData = async (req, res) => {
       }
 
       const origHeader = rows[0] || [];
-      let origDateColIdx = -1;
+      let dateColIdx = -1;
       let monthColIdx = -1;
       let timeColIdx = -1;
       let dateScannedColIdx = -1;
 
       for (let c = 0; c < origHeader.length; c++) {
         const val = String(origHeader[c] || '').trim().toLowerCase();
-        if (val === 'date' || val === 'date sent' || val === 'sent date') origDateColIdx = c;
+        if (val === 'date' || val === 'date sent' || val === 'sent date') dateColIdx = c;
         if (val === 'month') monthColIdx = c;
         if (val === 'time') timeColIdx = c;
         if (val === 'date scanned' || val === 'scanned date') dateScannedColIdx = c;
       }
 
+      const appendTime = (timeColIdx === -1 && monthColIdx === -1);
+      const appendDateScanned = (dateScannedColIdx === -1 && monthColIdx === -1);
+
       const newRows = [];
       for (let rIdx = 0; rIdx < rows.length; rIdx++) {
-        const row = rows[rIdx] || [];
+        const row = [...(rows[rIdx] || [])];
 
         if (rIdx === 0) {
-          const newHeader = [];
-          for (let c = 0; c < row.length; c++) {
-            if (c === monthColIdx || c === timeColIdx || c === dateScannedColIdx) {
-              continue;
-            }
-            newHeader.push(row[c]);
-            if (c === origDateColIdx) {
-              newHeader.push('Date Scanned');
-              newHeader.push('Time');
-            }
+          if (dateColIdx !== -1) {
+            row[dateColIdx] = 'Date';
           }
-          if (origDateColIdx === -1) {
-            newHeader.push('Date Scanned');
-            newHeader.push('Time');
+          if (dateScannedColIdx !== -1) {
+            row[dateScannedColIdx] = 'Date Scanned';
+          } else if (monthColIdx !== -1) {
+            row[monthColIdx] = 'Date Scanned';
+          } else if (appendDateScanned) {
+            row.push('Date Scanned');
           }
-          newRows.push(newHeader);
+
+          if (timeColIdx !== -1) {
+            row[timeColIdx] = 'Time';
+          } else if (appendTime) {
+            row.push('Time');
+          }
         } else {
           const log = logsList.find(l => l.sheet_name === sheetName && Number(l.row_idx) === rIdx);
           const { dateStr: scanDateStr, timeStr: scanTimeStr } = formatISTDateTime(log ? log.timestamp : null);
 
-          const newRow = [];
-          for (let c = 0; c < row.length; c++) {
-            if (c === monthColIdx || c === timeColIdx || c === dateScannedColIdx) {
-              continue;
-            }
-            let cellVal = row[c];
-            if (c === origDateColIdx) {
-              cellVal = parseExcelDate(cellVal);
-            }
-            newRow.push(cellVal);
-            if (c === origDateColIdx) {
-              newRow.push(scanDateStr || '');
-              newRow.push(scanTimeStr || '');
-            }
+          // 1. Format original Date column (Date Sent) in-place without shifting indices
+          if (dateColIdx !== -1) {
+            row[dateColIdx] = parseExcelDate(row[dateColIdx]);
           }
-          if (origDateColIdx === -1) {
-            newRow.push(scanDateStr || '');
-            newRow.push(scanTimeStr || '');
+
+          // 2. Format Date Scanned in-place or append
+          if (dateScannedColIdx !== -1) {
+            row[dateScannedColIdx] = scanDateStr || '';
+          } else if (monthColIdx !== -1) {
+            row[monthColIdx] = scanDateStr || '';
+          } else if (appendDateScanned) {
+            row.push(scanDateStr || '');
           }
-          newRows.push(newRow);
+
+          // 3. Format Time in-place or append
+          if (timeColIdx !== -1) {
+            row[timeColIdx] = scanTimeStr || '-';
+          } else if (appendTime) {
+            row.push(scanTimeStr || '-');
+          }
         }
+        newRows.push(row);
       }
       processed[sheetName] = newRows;
     });

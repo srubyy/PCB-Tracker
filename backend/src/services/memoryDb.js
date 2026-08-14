@@ -36,7 +36,8 @@ export const tables = {
   missing_pcbs: [],
   checkpoint_acknowledgements: [],
   client_part_codes: [],
-  lot_part_code_baselines: []
+  lot_part_code_baselines: [],
+  lot_raw_sheets: []
 };
 
 // --- Seed Parsing Helpers ---
