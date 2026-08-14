@@ -1079,7 +1079,10 @@ export const getLotProductionStats = async (req, res) => {
         base.verified_qty = await getScannedVerifiedQtyForPartCode(lotId, base.part_code);
       }
     }
-    stats.part_code_baselines = baselines;
+
+    // Filter baselines so the dropdown only shows scanned part codes with verified_qty > 0 for this lot
+    const scannedBaselines = baselines.filter(b => b.verified_qty > 0);
+    stats.part_code_baselines = scannedBaselines.length > 0 ? scannedBaselines : baselines;
 
     const partCodeCaps = {};
     const partCodesList = new Set([

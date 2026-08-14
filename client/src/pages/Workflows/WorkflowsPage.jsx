@@ -299,7 +299,10 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
       }));
     }
 
-    return lotProductionStats.part_code_baselines.map(base => {
+    const activeBaselines = (lotProductionStats.part_code_baselines || []).filter(b => b.verified_qty > 0);
+    const baselinesToUse = activeBaselines.length > 0 ? activeBaselines : lotProductionStats.part_code_baselines;
+
+    return baselinesToUse.map(base => {
       const name = presetPartCodeNames[base.part_code] || base.part_code;
       return {
         value: `${base.part_code} - ${name}`,

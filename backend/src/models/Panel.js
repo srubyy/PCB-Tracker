@@ -29,7 +29,13 @@ export const Panel = {
 
   async countAtStep(stepNo, lotNo = null) {
     if (isFallback()) {
-      return memoryDb.countAtStep(Number(stepNo), lotNo);
+      let panels = memoryDb.tables.panels || [];
+      if (lotNo) {
+        const lot = (memoryDb.tables.lots || []).find(l => l.lot_no === Number(lotNo) || l.id === Number(lotNo));
+        const lotId = lot ? lot.id : Number(lotNo);
+        panels = panels.filter(p => p.lot_id === lotId || p.lot_id === Number(lotNo));
+      }
+      return panels.filter(p => p.current_step === Number(stepNo) && p.status !== 'Scrap').length;
     }
     
     let sql = "SELECT COUNT(*) FROM panels WHERE current_step = $1 AND status != 'Scrap'";
