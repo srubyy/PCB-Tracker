@@ -859,8 +859,9 @@ export const rejectLog = async (req, res) => {
 
 export const getLotProductionStats = async (req, res) => {
   try {
-    const lotId = parseInt(req.params.lot_id);
-    const lot = await Lot.findById(lotId);
+    const rawLotId = parseInt(req.params.lot_id, 10);
+    const lotId = await resolveLotId(rawLotId);
+    const lot = await Lot.findById(lotId) || await Lot.findById(rawLotId);
     if (!lot) {
       return res.status(404).json({ error: "Lot not found." });
     }
@@ -878,14 +879,14 @@ export const getLotProductionStats = async (req, res) => {
     const partCodeCounts = {};
     const step6PartCodeCounts = {};
     if (isFallback()) {
-      const panels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lotId);
+      const panels = (memoryDb.tables.panels || []).filter(p => p.lot_id === lotId || p.lot_id === rawLotId);
       panels.forEach(p => {
         const pc = p.part_code || '';
         partCodeCounts[pc] = (partCodeCounts[pc] || 0) + 1;
       });
 
       const step6Scans = (memoryDb.tables.checkpoint_scans || []).filter(
-        cs => cs.lot_id === lotId && cs.checkpoint_step === 6 && !cs.is_unknown
+        cs => (cs.lot_id === lotId || cs.lot_id === rawLotId) && cs.checkpoint_step === 6 && !cs.is_unknown
       );
       step6Scans.forEach(cs => {
         const p = (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id);
@@ -895,7 +896,7 @@ export const getLotProductionStats = async (req, res) => {
         }
       });
     } else {
-      const pRes = await pool.query('SELECT part_code, COUNT(*)::integer FROM panels WHERE lot_id = $1 GROUP BY part_code', [lotId]);
+      const pRes = await pool.query('SELECT part_code, COUNT(*)::integer FROM panels WHERE lot_id = $1 OR lot_id = $2 GROUP BY part_code', [lotId, rawLotId]);
       pRes.rows.forEach(row => {
         partCodeCounts[row.part_code || ''] = row.count;
       });
@@ -904,9 +905,9 @@ export const getLotProductionStats = async (req, res) => {
         SELECT p.part_code, COUNT(*)::integer 
         FROM checkpoint_scans cs
         JOIN panels p ON cs.panel_id = p.id
-        WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND cs.is_unknown = FALSE
+        WHERE (cs.lot_id = $1 OR cs.lot_id = $2) AND cs.checkpoint_step = 6 AND cs.is_unknown = FALSE
         GROUP BY p.part_code
-      `, [lotId]);
+      `, [lotId, rawLotId]);
       s6Res.rows.forEach(row => {
         step6PartCodeCounts[row.part_code || ''] = row.count;
       });
@@ -917,8 +918,8 @@ export const getLotProductionStats = async (req, res) => {
     const pcbTypeStats = {};
     if (isFallback()) {
       const allLogs = [
-        ...memoryDb.tables.production_logs.filter(l => l.lot_id === lotId),
-        ...memoryDb.tables.pending_production_logs.filter(l => l.lot_id === lotId && !['Approved', 'Rejected'].includes(l.approval_status))
+        ...memoryDb.tables.production_logs.filter(l => l.lot_id === lotId || l.lot_id === rawLotId),
+        ...memoryDb.tables.pending_production_logs.filter(l => (l.lot_id === lotId || l.lot_id === rawLotId) && !['Approved', 'Rejected'].includes(l.approval_status))
       ];
       allLogs.forEach(log => {
         const key = `${log.step_no}_${log.pcb_type}`;
@@ -963,12 +964,12 @@ export const getLotProductionStats = async (req, res) => {
                COALESCE(SUM((step_data->>'bubble_packed')::integer), 0) AS bubble_packed,
                COALESCE(SUM((step_data->>'box_packed')::integer), 0) AS box_packed
         FROM (
-          SELECT lot_id, step_no, pcb_type, step_data FROM production_logs WHERE lot_id = $1
+          SELECT lot_id, step_no, pcb_type, step_data FROM production_logs WHERE lot_id = $1 OR lot_id = $2
           UNION ALL
-          SELECT lot_id, step_no, pcb_type, step_data FROM pending_production_logs WHERE lot_id = $1 AND approval_status NOT IN ('Approved', 'Rejected')
+          SELECT lot_id, step_no, pcb_type, step_data FROM pending_production_logs WHERE (lot_id = $1 OR lot_id = $2) AND approval_status NOT IN ('Approved', 'Rejected')
         ) combined
         GROUP BY step_no, pcb_type
-      `, [lotId]);
+      `, [lotId, rawLotId]);
       pcbRes.rows.forEach(row => {
         const key = `${row.step_no}_${row.pcb_type}`;
         pcbTypeStats[key] = {
@@ -995,19 +996,19 @@ export const getLotProductionStats = async (req, res) => {
 
     let baselines = [];
     if (isFallback()) {
-      baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId);
+      baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId || b.lot_id === rawLotId);
       if (baselines.length === 0) {
         const { initializeLotBaselines } = await import('./panelController.js');
         await initializeLotBaselines(lotId);
-        baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId);
+        baselines = memoryDb.tables.lot_part_code_baselines.filter(b => b.lot_id === lotId || b.lot_id === rawLotId);
       }
     } else {
-      const baseRes = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1', [lotId]);
+      const baseRes = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
       baselines = baseRes.rows;
       if (baselines.length === 0) {
         const { initializeLotBaselines } = await import('./panelController.js');
         await initializeLotBaselines(lotId);
-        const refetched = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1', [lotId]);
+        const refetched = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
         baselines = refetched.rows;
       }
     }
