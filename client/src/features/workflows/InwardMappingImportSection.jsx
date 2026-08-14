@@ -878,7 +878,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                       const cellVal = getCellValue(activeSheetName, rIdx, col.index, row[col.index]);
                       
                       const headerVal = String((activeSheetRows[0] && activeSheetRows[0][col.index]) || '').trim().toLowerCase();
-                      const isReadOnlyCol = headerVal === 'date' || headerVal === 'time' || headerVal === 'month';
+                      const isReadOnlyCol = headerVal === 'date' || headerVal === 'time' || headerVal === 'month' || headerVal === 'date scanned';
 
                       if (isReadOnlyCol) {
                         return (

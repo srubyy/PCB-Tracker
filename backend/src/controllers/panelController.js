@@ -1167,17 +1167,86 @@ export const getExcelData = async (req, res) => {
   }
   const lotId = await resolveLotId(rawLotId);
 
-  const formatLocalTime = (dateInput) => {
-    if (!dateInput) return '';
+  const parseExcelDate = (val) => {
+    if (val === undefined || val === null || val === '') return '';
+    const strVal = String(val).trim();
+    if (!strVal) return '';
+
+    const num = Number(strVal);
+    if (!isNaN(num) && num > 20000 && num < 60000) {
+      const utcDays = Math.floor(num - 25569);
+      const utcValue = utcDays * 86400;
+      const dateInfo = new Date(utcValue * 1000);
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${pad(dateInfo.getUTCDate())}/${pad(dateInfo.getUTCMonth() + 1)}/${dateInfo.getUTCFullYear()}`;
+    }
+
+    const monthsMap = {
+      jan: '01', feb: '02', mar: '03', apr: '04', may: '05', jun: '06',
+      jul: '07', aug: '08', sep: '09', oct: '10', nov: '11', dec: '12'
+    };
+    const dmmmyyyyMatch = strVal.match(/^(\d{1,2})[-/ ]([a-zA-Z]{3})[-/ ](\d{2,4})$/);
+    if (dmmmyyyyMatch) {
+      const day = dmmmyyyyMatch[1].padStart(2, '0');
+      const month = monthsMap[dmmmyyyyMatch[2].toLowerCase()];
+      let year = dmmmyyyyMatch[3];
+      if (year.length === 2) year = '20' + year;
+      if (month) return `${day}/${month}/${year}`;
+    }
+
+    const yymmddMatch = strVal.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})/);
+    if (yymmddMatch) {
+      const year = yymmddMatch[1];
+      const month = yymmddMatch[2].padStart(2, '0');
+      const day = yymmddMatch[3].padStart(2, '0');
+      return `${day}/${month}/${year}`;
+    }
+
+    const ddmmyyyyMatch = strVal.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{2,4})/);
+    if (ddmmyyyyMatch) {
+      const day = ddmmyyyyMatch[1].padStart(2, '0');
+      const month = ddmmyyyyMatch[2].padStart(2, '0');
+      let year = ddmmyyyyMatch[3];
+      if (year.length === 2) year = '20' + year;
+      return `${day}/${month}/${year}`;
+    }
+
+    const dObj = new Date(strVal);
+    if (!isNaN(dObj.getTime())) {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${pad(dObj.getDate())}/${pad(dObj.getMonth() + 1)}/${dObj.getFullYear()}`;
+    }
+
+    return strVal;
+  };
+
+  const formatISTDateTime = (dateInput) => {
+    if (!dateInput) return { dateStr: '', timeStr: '' };
     const dObj = new Date(dateInput);
-    if (isNaN(dObj.getTime())) return String(dateInput);
-    const pad = (num) => String(num).padStart(2, '0');
-    return `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())} ${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
+    if (isNaN(dObj.getTime())) return { dateStr: '', timeStr: '' };
+
+    const dateStr = dObj.toLocaleDateString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric'
+    }).replace(/-/g, '/');
+
+    const timeStr = dObj.toLocaleTimeString('en-IN', {
+      timeZone: 'Asia/Kolkata',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: true
+    }).toUpperCase();
+
+    return { dateStr, timeStr };
   };
 
   const processSheets = (sheetsObj, logsList) => {
     if (!sheetsObj) return {};
     const processed = {};
+
     Object.keys(sheetsObj).forEach(sheetName => {
       const rows = sheetsObj[sheetName] || [];
       if (rows.length === 0) {
@@ -1185,71 +1254,70 @@ export const getExcelData = async (req, res) => {
         return;
       }
 
-      const header = rows[0] || [];
-      let dateColIdx = -1;
+      const origHeader = rows[0] || [];
+      let origDateColIdx = -1;
       let monthColIdx = -1;
-      for (let c = 0; c < header.length; c++) {
-        const val = String(header[c] || '').trim().toLowerCase();
-        if (val === 'date') dateColIdx = c;
-        if (val === 'month') monthColIdx = c;
-      }
+      let timeColIdx = -1;
+      let dateScannedColIdx = -1;
 
-      const appendTime = (monthColIdx === -1);
-      const appendDate = (dateColIdx === -1);
+      for (let c = 0; c < origHeader.length; c++) {
+        const val = String(origHeader[c] || '').trim().toLowerCase();
+        if (val === 'date' || val === 'date sent' || val === 'sent date') origDateColIdx = c;
+        if (val === 'month') monthColIdx = c;
+        if (val === 'time') timeColIdx = c;
+        if (val === 'date scanned' || val === 'scanned date') dateScannedColIdx = c;
+      }
 
       const newRows = [];
       for (let rIdx = 0; rIdx < rows.length; rIdx++) {
-        const row = [...rows[rIdx]];
+        const row = rows[rIdx] || [];
+
         if (rIdx === 0) {
-          if (monthColIdx !== -1) {
-            row[monthColIdx] = 'Time';
-          } else {
-            row.push('Time');
+          const newHeader = [];
+          for (let c = 0; c < row.length; c++) {
+            if (c === monthColIdx || c === timeColIdx || c === dateScannedColIdx) {
+              continue;
+            }
+            newHeader.push(row[c]);
+            if (c === origDateColIdx) {
+              newHeader.push('Date Scanned');
+              newHeader.push('Time');
+            }
           }
-          if (dateColIdx !== -1) {
-            row[dateColIdx] = 'Date';
-          } else {
-            row.push('Date');
+          if (origDateColIdx === -1) {
+            newHeader.push('Date Scanned');
+            newHeader.push('Time');
           }
+          newRows.push(newHeader);
         } else {
           const log = logsList.find(l => l.sheet_name === sheetName && Number(l.row_idx) === rIdx);
-          let scanDateStr = '';
-          let scanTimeStr = '';
-          if (log && log.timestamp) {
-            const parts = String(log.timestamp).split(' ');
-            if (parts.length === 2) {
-              scanDateStr = parts[0];
-              scanTimeStr = parts[1];
-            } else {
-              const dObj = new Date(log.timestamp);
-              if (!isNaN(dObj.getTime())) {
-                const pad = (num) => String(num).padStart(2, '0');
-                scanDateStr = `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())}`;
-                scanTimeStr = `${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
-              }
+          const { dateStr: scanDateStr, timeStr: scanTimeStr } = formatISTDateTime(log ? log.timestamp : null);
+
+          const newRow = [];
+          for (let c = 0; c < row.length; c++) {
+            if (c === monthColIdx || c === timeColIdx || c === dateScannedColIdx) {
+              continue;
+            }
+            let cellVal = row[c];
+            if (c === origDateColIdx) {
+              cellVal = parseExcelDate(cellVal);
+            }
+            newRow.push(cellVal);
+            if (c === origDateColIdx) {
+              newRow.push(scanDateStr || '');
+              newRow.push(scanTimeStr || '');
             }
           }
-
-          if (monthColIdx !== -1) {
-            row[monthColIdx] = scanTimeStr || '-';
+          if (origDateColIdx === -1) {
+            newRow.push(scanDateStr || '');
+            newRow.push(scanTimeStr || '');
           }
-          if (dateColIdx !== -1) {
-            if (scanDateStr) {
-              row[dateColIdx] = scanDateStr;
-            }
-          }
-
-          if (appendTime) {
-            row.push(scanTimeStr || '-');
-          }
-          if (appendDate) {
-            row.push(scanDateStr || '');
-          }
+          newRows.push(newRow);
         }
-        newRows.push(row);
       }
       processed[sheetName] = newRows;
     });
+
     return processed;
   };
 
