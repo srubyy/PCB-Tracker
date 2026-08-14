@@ -513,7 +513,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       }
     }
   }
-};
+
   if (stepNo === 4) {
     return getStepOkSum(cleanLotId, 3, cleanPartCode, 'code_ok');
   }
