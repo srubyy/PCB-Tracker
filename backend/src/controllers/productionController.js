@@ -295,7 +295,6 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
       if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
 
       const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
-                        scannedRowIndices.has(p.sr_no) ||
                         scannedDummyNos.has(p.dummy_sr_no) ||
                         scannedBarcodes.has(p.barcode) ||
                         scannedBarcodes.has(p.real_sr_no);
@@ -313,7 +312,7 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
         SELECT COUNT(DISTINCT p.id)::integer 
         FROM panels p
         JOIN scan_logs sl ON (sl.lot_id = p.lot_id OR sl.lot_id = $3) AND sl.timestamp IS NOT NULL AND (
-          (sl.row_idx IS NOT NULL AND (sl.row_idx = p.sr_no - 1 OR sl.row_idx = p.sr_no)) OR
+          (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
           (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
           (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
         )
@@ -376,7 +375,6 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
 
         const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
-                          scannedRowIndices.has(p.sr_no) ||
                           scannedDummyNos.has(p.dummy_sr_no) ||
                           scannedBarcodes.has(p.barcode) ||
                           scannedBarcodes.has(p.real_sr_no);
@@ -396,8 +394,10 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             let isRepairable = p.repairable;
             if (edit) {
               isRepairable = (edit.value === 'true' || edit.value === true);
+            } else if (isRepairable === undefined || isRepairable === null) {
+              isRepairable = (p.status === 'Repairable');
             }
-            if (isRepairable === false || isRepairable === 'false' || p.status === 'Non-Repairable') {
+            if (isRepairable !== true && isRepairable !== 'true') {
               return false;
             }
           }
@@ -408,7 +408,6 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
 
       if (panels.length > 0) return panels.length;
 
-      // Fallback: If no panels in memoryDb yet, count valid repairable scanned items directly from scan_logs
       let validScanCount = 0;
       lotScanLogs.forEach(sl => {
         const mfgYear = sl.mfg_year || extractMfgYear(sl.actual_serial_no);
@@ -432,19 +431,20 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
           SELECT COUNT(DISTINCT p.id)::integer 
           FROM panels p
           JOIN scan_logs sl ON (sl.lot_id = p.lot_id OR sl.lot_id = $4) AND sl.timestamp IS NOT NULL AND (
-            (sl.row_idx IS NOT NULL AND (sl.row_idx = p.sr_no - 1 OR sl.row_idx = p.sr_no)) OR
+            (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
             (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
             (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
           )
-          LEFT JOIN cell_edits ce ON (ce.lot_id = p.lot_id OR ce.lot_id = $4) AND (ce.row_idx = p.sr_no - 1 OR ce.row_idx = p.sr_no) AND ce.col_idx = 'repairable'
+          LEFT JOIN cell_edits ce ON (ce.lot_id = p.lot_id OR ce.lot_id = $4) AND ce.row_idx = p.sr_no - 1 AND ce.col_idx = 'repairable'
           WHERE (p.lot_id = $1 OR p.lot_id = $4)
             AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
             AND (p.status IS NULL OR (LOWER(p.status) NOT IN ('scrap', 'separate', 'non-repairable')))
             AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $5))
             AND (
               p.mfg_year IS NULL OR p.mfg_year < $6 OR 
-              (ce.value = 'true' OR (ce.value IS NULL AND (p.repairable IS TRUE OR p.repairable IS NULL)))
+              (ce.value = 'true' OR (ce.value IS NULL AND p.repairable IS TRUE))
             )
+            AND (ce.value IS DISTINCT FROM 'false')
         `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
         const count = res.rows[0].count;
@@ -475,7 +475,6 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
           const pCode = (p.part_code || '').trim().toUpperCase();
           if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
           const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
-                            scannedRowIndices.has(p.sr_no) ||
                             scannedDummyNos.has(p.dummy_sr_no) ||
                             scannedBarcodes.has(p.barcode) ||
                             scannedBarcodes.has(p.real_sr_no);
@@ -490,8 +489,10 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
               let isRepairable = p.repairable;
               if (edit) {
                 isRepairable = (edit.value === 'true' || edit.value === true);
+              } else if (isRepairable === undefined || isRepairable === null) {
+                isRepairable = (p.status === 'Repairable');
               }
-              if (isRepairable === false || isRepairable === 'false' || p.status === 'Non-Repairable') {
+              if (isRepairable !== true && isRepairable !== 'true') {
                 return false;
               }
             }
