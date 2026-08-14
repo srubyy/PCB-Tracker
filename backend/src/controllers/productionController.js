@@ -277,6 +277,66 @@ const resolveLotId = async (inputLotId) => {
   }
 };
 
+export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
+  const saMatch = String(partCode).match(/SA\d+/i);
+  const cleanPartCode = saMatch ? saMatch[0].toUpperCase() : partCode.split(' - ')[0].trim().toUpperCase();
+  const cleanLotId = await resolveLotId(lotId);
+  const rawLotId = parseInt(lotId, 10);
+
+  if (isFallback()) {
+    const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => (sl.lot_id === cleanLotId || sl.lot_id === rawLotId) && sl.timestamp);
+    const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
+    const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
+    const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
+
+    const scannedPanels = (memoryDb.tables.panels || []).filter(p => {
+      if (p.lot_id !== cleanLotId && p.lot_id !== rawLotId) return false;
+      const pCode = (p.part_code || '').trim().toUpperCase();
+      if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
+
+      const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
+                        scannedRowIndices.has(p.sr_no) ||
+                        scannedDummyNos.has(p.dummy_sr_no) ||
+                        scannedBarcodes.has(p.barcode) ||
+                        scannedBarcodes.has(p.real_sr_no);
+      return isScanned;
+    });
+
+    if (scannedPanels.length > 0) return scannedPanels.length;
+    return lotScanLogs.filter(sl => {
+      const pCode = sl.actual_serial_no ? (sl.actual_serial_no.match(/SA\d+/i)?.[0]?.toUpperCase() || 'SA0010') : 'SA0010';
+      return pCode === cleanPartCode;
+    }).length;
+  } else {
+    try {
+      const res = await pool.query(`
+        SELECT COUNT(DISTINCT p.id)::integer 
+        FROM panels p
+        JOIN scan_logs sl ON (sl.lot_id = p.lot_id OR sl.lot_id = $3) AND sl.timestamp IS NOT NULL AND (
+          (sl.row_idx IS NOT NULL AND (sl.row_idx = p.sr_no - 1 OR sl.row_idx = p.sr_no)) OR
+          (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
+          (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
+        )
+        WHERE (p.lot_id = $1 OR p.lot_id = $3)
+          AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
+      `, [cleanLotId, cleanPartCode, rawLotId]);
+
+      const count = res.rows[0].count;
+      if (count > 0) return count;
+
+      const scanRes = await pool.query(`
+        SELECT COUNT(DISTINCT id)::integer
+        FROM scan_logs
+        WHERE (lot_id = $1 OR lot_id = $3) AND timestamp IS NOT NULL
+          AND UPPER(actual_serial_no) LIKE '%' || $2 || '%'
+      `, [cleanLotId, cleanPartCode, rawLotId]);
+      return scanRes.rows[0].count;
+    } catch (err) {
+      return 0;
+    }
+  }
+};
+
 export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
   const saMatch = String(partCode).match(/SA\d+/i);
   const cleanPartCode = saMatch ? saMatch[0].toUpperCase() : partCode.split(' - ')[0].trim().toUpperCase();
@@ -376,14 +436,14 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
             (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
           )
-          LEFT JOIN cell_edits ce ON ce.lot_id = p.lot_id AND ce.row_idx = p.sr_no - 1 AND ce.col_idx = 'repairable'
+          LEFT JOIN cell_edits ce ON (ce.lot_id = p.lot_id OR ce.lot_id = $4) AND (ce.row_idx = p.sr_no - 1 OR ce.row_idx = p.sr_no) AND ce.col_idx = 'repairable'
           WHERE (p.lot_id = $1 OR p.lot_id = $4)
             AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
             AND (p.status IS NULL OR (LOWER(p.status) NOT IN ('scrap', 'separate', 'non-repairable')))
             AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $5))
             AND (
               p.mfg_year IS NULL OR p.mfg_year < $6 OR 
-              (ce.value = 'true' OR (ce.value IS NULL AND p.repairable IS NOT FALSE))
+              (ce.value = 'true' OR (ce.value IS NULL AND (p.repairable IS TRUE OR p.repairable IS NULL)))
             )
         `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
@@ -453,7 +513,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       }
     }
   }
-
+};
   if (stepNo === 4) {
     return getStepOkSum(cleanLotId, 3, cleanPartCode, 'code_ok');
   }
@@ -1010,6 +1070,12 @@ export const getLotProductionStats = async (req, res) => {
         await initializeLotBaselines(lotId);
         const refetched = await pool.query('SELECT part_code, verified_qty, locked FROM lot_part_code_baselines WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
         baselines = refetched.rows;
+      }
+    }
+    // Dynamically compute real-time scanned verified count per part code for baselines
+    for (const base of baselines) {
+      if (!base.locked) {
+        base.verified_qty = await getScannedVerifiedQtyForPartCode(lotId, base.part_code);
       }
     }
     stats.part_code_baselines = baselines;
