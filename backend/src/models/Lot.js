@@ -82,11 +82,11 @@ export const Lot = {
         lot.qty_sent, 
         lot.received_qty, 
         lot.remarks,
-        lot.scrap_year_threshold || null,
-        lot.separate_year_threshold || null,
-        lot.checkbox_year_threshold || null,
+        lot.scrap_year_threshold !== undefined && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021,
+        lot.separate_year_threshold !== undefined && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022,
+        lot.checkbox_year_threshold !== undefined && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023,
         lot.created_by || null,
-        lot.status || 'Draft'
+        lot.status || 'Active'
       ]
     );
     return res.rows[0];

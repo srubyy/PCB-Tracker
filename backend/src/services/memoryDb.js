@@ -177,6 +177,36 @@ function parseInsertLine(line) {
   tables[tblName].push(row);
 }
 
+const snapshotPath = path.join(process.cwd(), 'uploads', 'memory_db_snapshot.json');
+
+export const saveSnapshot = () => {
+  try {
+    const dir = path.dirname(snapshotPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(snapshotPath, JSON.stringify(tables, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save memoryDb snapshot:', err.message);
+  }
+};
+
+export const loadSnapshot = () => {
+  try {
+    if (fs.existsSync(snapshotPath)) {
+      const data = JSON.parse(fs.readFileSync(snapshotPath, 'utf8'));
+      Object.keys(data).forEach(k => {
+        if (Array.isArray(data[k]) && data[k].length > 0) {
+          tables[k] = data[k];
+        }
+      });
+      console.log('💾 Loaded memoryDb snapshot from disk successfully.');
+      return true;
+    }
+  } catch (err) {
+    console.error('Failed to load memoryDb snapshot:', err.message);
+  }
+  return false;
+};
+
 export function initializeMemoryDb() {
   tables.client_part_codes = [
     { id: 1, client_id: 2, part_code: 'SA0019', name: 'PCB GV2_CFEfficio' },
@@ -221,13 +251,25 @@ export function initializeMemoryDb() {
         }
       }
     }
-    // Map status values for pre-seeded lots to match rules:
+    // Map status values and ensure default year threshold rules for all pre-seeded lots
     tables.lots.forEach(lot => {
       if (lot.status === 'In Process') {
         lot.status = 'Active';
       } else if (lot.status === 'Complete') {
         lot.status = 'Closed';
       }
+      if (lot.scrap_year_threshold === null || lot.scrap_year_threshold === undefined) lot.scrap_year_threshold = 2021;
+      if (lot.separate_year_threshold === null || lot.separate_year_threshold === undefined) lot.separate_year_threshold = 2022;
+      if (lot.checkbox_year_threshold === null || lot.checkbox_year_threshold === undefined) lot.checkbox_year_threshold = 2023;
+    });
+
+    // Load persistent disk snapshot overlay (preserving company lots and custom mfg year rules across restarts)
+    loadSnapshot();
+
+    tables.lots.forEach(lot => {
+      if (lot.scrap_year_threshold === null || lot.scrap_year_threshold === undefined) lot.scrap_year_threshold = 2021;
+      if (lot.separate_year_threshold === null || lot.separate_year_threshold === undefined) lot.separate_year_threshold = 2022;
+      if (lot.checkbox_year_threshold === null || lot.checkbox_year_threshold === undefined) lot.checkbox_year_threshold = 2023;
     });
 
     console.log(`✅ Loaded seed data successfully: parsed ${insertCount} INSERT statements.`);
@@ -388,23 +430,28 @@ export const createLot = (lot) => {
     return_qty: 0,
     redispatch_qty: 0,
     received_date: new Date().toISOString().split('T')[0],
-    status: 'Draft',
-    scrap_year_threshold: null,
-    separate_year_threshold: null,
-    checkbox_year_threshold: null,
+    status: 'Active',
+    scrap_year_threshold: 2021,
+    separate_year_threshold: 2022,
+    checkbox_year_threshold: 2023,
     created_by: null,
     ...lot
   };
+  if (newLot.scrap_year_threshold === null || newLot.scrap_year_threshold === undefined) newLot.scrap_year_threshold = 2021;
+  if (newLot.separate_year_threshold === null || newLot.separate_year_threshold === undefined) newLot.separate_year_threshold = 2022;
+  if (newLot.checkbox_year_threshold === null || newLot.checkbox_year_threshold === undefined) newLot.checkbox_year_threshold = 2023;
   tables.lots.push(newLot);
+  saveSnapshot();
   return newLot;
 };
 
 export const updateLotRules = (id, rules) => {
   const lot = tables.lots.find(r => r.id === id);
   if (lot) {
-    lot.scrap_year_threshold = rules.scrap_year_threshold !== undefined ? rules.scrap_year_threshold : lot.scrap_year_threshold;
-    lot.separate_year_threshold = rules.separate_year_threshold !== undefined ? rules.separate_year_threshold : lot.separate_year_threshold;
-    lot.checkbox_year_threshold = rules.checkbox_year_threshold !== undefined ? rules.checkbox_year_threshold : lot.checkbox_year_threshold;
+    lot.scrap_year_threshold = rules.scrap_year_threshold !== undefined && rules.scrap_year_threshold !== null ? rules.scrap_year_threshold : (lot.scrap_year_threshold || 2021);
+    lot.separate_year_threshold = rules.separate_year_threshold !== undefined && rules.separate_year_threshold !== null ? rules.separate_year_threshold : (lot.separate_year_threshold || 2022);
+    lot.checkbox_year_threshold = rules.checkbox_year_threshold !== undefined && rules.checkbox_year_threshold !== null ? rules.checkbox_year_threshold : (lot.checkbox_year_threshold || 2023);
+    saveSnapshot();
     return lot;
   }
   return null;

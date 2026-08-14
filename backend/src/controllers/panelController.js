@@ -1052,6 +1052,7 @@ const syncExcelPanels = async (lotId, sheets) => {
   }
 
   await initializeLotBaselines(lotId);
+  if (isFallback()) memoryDb.saveSnapshot();
 };
 
 export const uploadExcel = async (req, res) => {
@@ -1526,6 +1527,7 @@ export const saveCellEdit = async (req, res) => {
     }
 
     await initializeLotBaselines(lotId);
+    if (isFallback()) memoryDb.saveSnapshot();
 
     res.json({ success: true, message: "Cell edit saved successfully." });
   } catch (err) {
@@ -2049,13 +2051,47 @@ export const saveLotRules = async (req, res) => {
       return res.status(404).json({ error: "Lot not found." });
     }
 
-
+    const scrapVal = scrap_year_threshold !== undefined && scrap_year_threshold !== '' && scrap_year_threshold !== null ? parseInt(scrap_year_threshold, 10) : 2021;
+    const sepVal = separate_year_threshold !== undefined && separate_year_threshold !== '' && separate_year_threshold !== null ? parseInt(separate_year_threshold, 10) : 2022;
+    const chkVal = checkbox_year_threshold !== undefined && checkbox_year_threshold !== '' && checkbox_year_threshold !== null ? parseInt(checkbox_year_threshold, 10) : 2023;
 
     const updated = await Lot.updateRules(lotId, {
-      scrap_year_threshold: scrap_year_threshold !== undefined && scrap_year_threshold !== '' ? parseInt(scrap_year_threshold, 10) : null,
-      separate_year_threshold: separate_year_threshold !== undefined && separate_year_threshold !== '' ? parseInt(separate_year_threshold, 10) : null,
-      checkbox_year_threshold: checkbox_year_threshold !== undefined && checkbox_year_threshold !== '' ? parseInt(checkbox_year_threshold, 10) : null
+      scrap_year_threshold: scrapVal,
+      separate_year_threshold: sepVal,
+      checkbox_year_threshold: chkVal
     });
+
+    // Re-evaluate panels status for this lot with updated thresholds
+    if (isFallback()) {
+      (memoryDb.tables.panels || []).forEach(p => {
+        if (p.lot_id === lotId && p.mfg_year) {
+          if (p.mfg_year <= scrapVal) {
+            p.status = 'Scrap';
+            p.scrap_reason = `Manufacturing Year (${p.mfg_year}) <= ${scrapVal}`;
+          } else if (sepVal && p.mfg_year === sepVal) {
+            p.status = 'Separate';
+            p.scrap_reason = `Manufacturing Year (${p.mfg_year}) == ${sepVal}`;
+          } else {
+            p.status = 'Repairable';
+            p.scrap_reason = null;
+          }
+        }
+      });
+      memoryDb.saveSnapshot();
+    } else {
+      await pool.query(
+        `UPDATE panels SET status = 'Scrap', scrap_reason = 'Manufacturing Year (' || mfg_year || ') <= ' || $2 WHERE lot_id = $1 AND mfg_year IS NOT NULL AND mfg_year <= $2`,
+        [lotId, scrapVal]
+      );
+      await pool.query(
+        `UPDATE panels SET status = 'Separate', scrap_reason = 'Manufacturing Year (' || mfg_year || ') == ' || $2 WHERE lot_id = $1 AND mfg_year IS NOT NULL AND mfg_year = $2`,
+        [lotId, sepVal]
+      );
+      await pool.query(
+        `UPDATE panels SET status = 'Repairable', scrap_reason = NULL WHERE lot_id = $1 AND mfg_year IS NOT NULL AND mfg_year > $2 AND (mfg_year != $3 OR $3 IS NULL)`,
+        [lotId, scrapVal, sepVal]
+      );
+    }
 
     res.json(updated);
   } catch (err) {
