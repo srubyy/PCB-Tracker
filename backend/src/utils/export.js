@@ -2,11 +2,27 @@ import pool, { isFallback } from '../config/db.js';
 import * as memoryDb from '../services/memoryDb.js';
 import ExcelJS from 'exceljs';
 
-const extractMfgYear = (serial) => {
+const extractMfgYear = (serial, explicitYear = null) => {
+  if (explicitYear !== null && explicitYear !== undefined && explicitYear !== '') {
+    const parsed = parseInt(String(explicitYear).trim(), 10);
+    if (!isNaN(parsed) && parsed >= 2000 && parsed <= 2050) {
+      return parsed;
+    }
+  }
+
   if (!serial) return null;
   const s = String(serial).trim();
   const len = s.length;
+
   if (s.startsWith('AT') && len <= 8) return null;
+  if (/^SA\d+/i.test(s)) return null;
+
+  const fourDigitMatch = s.match(/(20[1-5]\d)/);
+  if (fourDigitMatch) {
+    const yr = parseInt(fourDigitMatch[1], 10);
+    if (yr >= 2010 && yr <= 2050) return yr;
+  }
+
   const matches = s.match(/[a-zA-Z](\d{2})/g);
   if (matches) {
     for (const m of matches) {
@@ -320,6 +336,7 @@ export const buildExportWorkbook = async (
     const header = (rows[0] || []).map(h => String(h || '').toLowerCase().trim());
     let dummyColIdx = -1;
     let barcodeColIdx = -1;
+    let mfgYearColIdx = -1;
     for (let i = 0; i < header.length; i++) {
       const val = header[i];
       if (val.includes('pcb sr no') || val.includes('pcb serial') || val.includes('dummy') || val.includes('sr no') || val.includes('sr_no')) {
@@ -327,6 +344,9 @@ export const buildExportWorkbook = async (
       }
       if (val.includes('barcode') || val.includes('actual serial') || val.includes('real serial')) {
         if (barcodeColIdx === -1) barcodeColIdx = i;
+      }
+      if (val === 'mfg year' || val === 'mfg_year' || val === 'year' || val.includes('mfg year') || val.includes('manufacturing year')) {
+        if (mfgYearColIdx === -1) mfgYearColIdx = i;
       }
     }
 
@@ -390,7 +410,8 @@ export const buildExportWorkbook = async (
       if (actualBarcode === '-') actualBarcode = '';
 
       const barcodeLength = actualBarcode ? actualBarcode.length : 0;
-      const calculatedYear = extractMfgYear(actualBarcode);
+      const rawMfgYearVal = mfgYearColIdx !== -1 && mfgYearColIdx < originalRow.length ? String(originalRow[mfgYearColIdx] || '').trim() : '';
+      const calculatedYear = extractMfgYear(actualBarcode, rawMfgYearVal);
 
       let repairableVal = 'No';
       const repairableEdit = sheetEdits.find(e => Number(e.row_idx) === rIdx && String(e.col_idx) === 'repairable');

@@ -12,17 +12,27 @@ import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
-const extractMfgYear = (serial) => {
+const extractMfgYear = (serial, explicitYear = null) => {
+  if (explicitYear !== null && explicitYear !== undefined && explicitYear !== '') {
+    const parsed = parseInt(String(explicitYear).trim(), 10);
+    if (!isNaN(parsed) && parsed >= 2000 && parsed <= 2050) {
+      return parsed;
+    }
+  }
+
   if (!serial) return null;
   const s = String(serial).trim();
   const len = s.length;
 
-  // Guard: if it starts with 'AT' and has length <= 8, it is a dummy serial number
-  if (s.startsWith('AT') && len <= 8) {
-    return null;
+  if (s.startsWith('AT') && len <= 8) return null;
+  if (/^SA\d+/i.test(s)) return null;
+
+  const fourDigitMatch = s.match(/(20[1-5]\d)/);
+  if (fourDigitMatch) {
+    const yr = parseInt(fourDigitMatch[1], 10);
+    if (yr >= 2010 && yr <= 2050) return yr;
   }
 
-  // Try regex matching: any letter followed by exactly 2 digits (e.g. B22, E26, D21)
   const matches = s.match(/[a-zA-Z](\d{2})/g);
   if (matches) {
     for (const m of matches) {
@@ -33,7 +43,6 @@ const extractMfgYear = (serial) => {
     }
   }
 
-  // 1. Fallback: Atomberg format: extract characters at index 2 and 3 (0-based)
   if (len >= 4) {
     const yrPart = s.substring(2, 4);
     const yr = parseInt(yrPart, 10);
@@ -42,7 +51,6 @@ const extractMfgYear = (serial) => {
     }
   }
 
-  // 2. Legacy fallback patterns
   if (len === 16 || len === 17) {
     const yr = parseInt(s.substring(3, 5), 10);
     if (!isNaN(yr)) return yr + 2000;
@@ -999,8 +1007,7 @@ const syncExcelPanels = async (lotId, sheets) => {
     const hasRealBarcode = rawBarcode && rawBarcode !== '-';
     const barcode = hasRealBarcode ? rawBarcode : (dummy || `DUMMY-${lotId}-${r + 1}-${Date.now()}`);
     const rawMfgYearVal = mfgYearColIdx !== -1 ? String(row[mfgYearColIdx] || '').trim() : '';
-    const parsedMfgYear = rawMfgYearVal ? parseInt(rawMfgYearVal, 10) : null;
-    const mfgYear = (hasRealBarcode ? extractMfgYear(rawBarcode) : null) || (!isNaN(parsedMfgYear) && parsedMfgYear >= 2000 && parsedMfgYear <= 2050 ? parsedMfgYear : null);
+    const mfgYear = extractMfgYear(hasRealBarcode ? rawBarcode : barcode, rawMfgYearVal);
 
     let status = 'Repairable';
     let scrapReason = null;
@@ -1350,8 +1357,7 @@ export const saveCellEdit = async (req, res) => {
         if (updateField === 'real_sr_no') {
           fields.barcode = updateValue;
           const rawYearVal = mfgYearColIdx !== -1 && rows[row_idx] ? String(rows[row_idx][mfgYearColIdx] || '').trim() : '';
-          const parsedMfgYear = rawYearVal ? parseInt(rawYearVal, 10) : null;
-          const mfgYear = extractMfgYear(updateValue) || (!isNaN(parsedMfgYear) && parsedMfgYear >= 2000 && parsedMfgYear <= 2050 ? parsedMfgYear : null);
+          const mfgYear = extractMfgYear(updateValue, rawYearVal);
           fields.mfg_year = mfgYear;
 
           let scrapYear = 2021;
@@ -1424,8 +1430,7 @@ export const saveCellEdit = async (req, res) => {
       }
 
       const rawYearVal = mfgYearColIdx !== -1 && rows[row_idx] ? String(rows[row_idx][mfgYearColIdx] || '').trim() : '';
-      const parsedMfgYear = rawYearVal ? parseInt(rawYearVal, 10) : null;
-      const mfgYear = extractMfgYear(actualSerialVal) || (!isNaN(parsedMfgYear) && parsedMfgYear >= 2000 && parsedMfgYear <= 2050 ? parsedMfgYear : null);
+      const mfgYear = extractMfgYear(actualSerialVal, rawYearVal);
 
       let scrapYear = 2021;
       let sepYear = 2022;

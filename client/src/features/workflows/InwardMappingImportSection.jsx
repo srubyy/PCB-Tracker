@@ -53,15 +53,32 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     return letter;
   };
 
-  // Helper to extract manufacturing year based on Actual Serial
-  const getMfgYear = (serial) => {
+  // Helper to extract manufacturing year based on Actual Serial or explicit year input
+  const getMfgYear = (serial, explicitYear = null) => {
+    if (explicitYear !== null && explicitYear !== undefined && explicitYear !== '') {
+      const parsed = parseInt(String(explicitYear).trim(), 10);
+      if (!isNaN(parsed) && parsed >= 2000 && parsed <= 2050) {
+        return parsed;
+      }
+    }
+
     if (!serial) return null;
     const s = String(serial).trim();
     const len = s.length;
 
-    // Guard: starts with 'AT' and length <= 8 is dummy
+    // Guard: starts with 'AT' and length <= 8 is dummy, or SA part code
     if (s.startsWith('AT') && len <= 8) {
       return null;
+    }
+    if (/^SA\d+/i.test(s)) {
+      return null;
+    }
+
+    // Direct 4-digit year search (2010 to 2050) in serial
+    const fourDigitMatch = s.match(/(20[1-5]\d)/);
+    if (fourDigitMatch) {
+      const yr = parseInt(fourDigitMatch[1], 10);
+      if (yr >= 2010 && yr <= 2050) return yr;
     }
 
     // Try regex matching: any letter followed by exactly 2 digits (e.g. B22, E26, D21)
@@ -688,8 +705,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
                 
                 const rawMfgYearVal = mfgYearColIdx !== -1 ? row[mfgYearColIdx] : '';
                 const cellMfgYearVal = getCellValue(activeSheetName, rIdx, mfgYearColIdx, rawMfgYearVal);
-                const parsedCellYear = cellMfgYearVal ? parseInt(String(cellMfgYearVal).trim(), 10) : null;
-                const calculatedYear = getMfgYear(actualBarcode) || (!isNaN(parsedCellYear) && parsedCellYear >= 2000 && parsedCellYear <= 2050 ? parsedCellYear : null);
+                const calculatedYear = getMfgYear(actualBarcode, cellMfgYearVal);
                 const valInfo = getValidationInfo(actualBarcode, calculatedYear);
                 const isHighlighted = activeRowIdx === rIdx;
 

@@ -6,12 +6,29 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill
 from openpyxl.utils import get_column_letter
 
-def extract_mfg_year(barcode):
-    if not barcode or barcode == '-' or len(barcode) < 10:
+def extract_mfg_year(barcode, explicit_year=None):
+    if explicit_year is not None and str(explicit_year).strip():
+        try:
+            yr = int(str(explicit_year).strip())
+            if 2000 <= yr <= 2050:
+                return yr
+        except ValueError:
+            pass
+
+    if not barcode or barcode == '-' or len(barcode) < 4:
         return None
     s = str(barcode).strip()
     if s.startswith('AT') and len(s) <= 8:
         return None
+    if s.lower().startswith('sa') and len(s) <= 8:
+        return None
+
+    # Direct 4-digit year match (2010 to 2050)
+    four_digit = re.search(r'(20[1-5]\d)', s)
+    if four_digit:
+        yr = int(four_digit.group(1))
+        if 2010 <= yr <= 2050:
+            return yr
     
     # Regex matching: any letter followed by exactly 2 digits (e.g. B22, E26, D21)
     matches = re.findall(r'[a-zA-Z](\d{2})', s)
@@ -146,7 +163,8 @@ def generate_excel(json_data):
                     
                 # Compute virtual column values
                 barcode_length = len(actual_barcode) if actual_barcode else 0
-                calculated_year = extract_mfg_year(actual_barcode)
+                raw_mfg_year_val = row[mfg_year_col_idx] if (mfg_year_col_idx != -1 and mfg_year_col_idx < len(row)) else None
+                calculated_year = extract_mfg_year(actual_barcode, raw_mfg_year_val)
                 
                 repairable_val = 'No'
                 for edit in sheet_edits:
