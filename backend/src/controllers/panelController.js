@@ -1536,27 +1536,47 @@ export const saveCellEdit = async (req, res) => {
   }
 };
 
+export const resolveLotId = async (inputLotId) => {
+  const num = parseInt(inputLotId, 10);
+  if (isNaN(num)) return null;
+  if (isFallback()) {
+    const lot = (memoryDb.tables.lots || []).find(l => l.id === num || l.lot_no === num);
+    return lot ? lot.id : num;
+  }
+  try {
+    const res = await pool.query('SELECT id FROM lots WHERE id = $1 OR lot_no = $1 LIMIT 1', [num]);
+    return res.rows.length > 0 ? res.rows[0].id : num;
+  } catch (err) {
+    return num;
+  }
+};
+
 export const exportExcel = async (req, res) => {
   const { id } = req.params;
-  const lotId = parseInt(id, 10);
+  const rawLotId = parseInt(id, 10);
 
-  if (isNaN(lotId)) {
+  if (isNaN(rawLotId)) {
     return res.status(400).json({ error: "Invalid lot ID." });
   }
 
   try {
-    const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+    const lotId = await resolveLotId(rawLotId);
+    let finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+    if (!fs.existsSync(finalJsonPath)) {
+      finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
+    }
+
     let rawSheets = null;
     if (fs.existsSync(finalJsonPath)) {
       rawSheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
     } else {
       if (isFallback()) {
-        const entry = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId);
+        const entry = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId || s.lot_id === rawLotId);
         if (entry) {
           rawSheets = JSON.parse(entry.raw_json);
         }
       } else {
-        const dbRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1', [lotId]);
+        const dbRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
         if (dbRes.rows.length > 0) {
           rawSheets = JSON.parse(dbRes.rows[0].raw_json);
         }
@@ -1567,9 +1587,9 @@ export const exportExcel = async (req, res) => {
       // Fallback: Reconstruct rawSheets from panels in database!
       let allPanels = [];
       if (isFallback()) {
-        allPanels = memoryDb.tables.panels.filter(p => p.lot_id === lotId);
+        allPanels = memoryDb.tables.panels.filter(p => p.lot_id === lotId || p.lot_id === rawLotId);
       } else {
-        const panelsRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1 ORDER BY sr_no ASC', [lotId]);
+        const panelsRes = await pool.query('SELECT * FROM panels WHERE lot_id = $1 OR lot_id = $2 ORDER BY sr_no ASC', [lotId, rawLotId]);
         allPanels = panelsRes.rows;
       }
 
@@ -1580,20 +1600,33 @@ export const exportExcel = async (req, res) => {
         
         allPanels.forEach(p => {
           if (p.excel_data) {
-            let maxColIdx = 0;
-            const eData = typeof p.excel_data === 'string' ? JSON.parse(p.excel_data) : p.excel_data;
-            Object.keys(eData).forEach(k => {
-              const match = k.match(/Col_(\d+)/);
-              if (match) {
-                const idx = parseInt(match[1], 10);
-                if (idx > maxColIdx) maxColIdx = idx;
+            try {
+              let maxColIdx = 0;
+              const eData = typeof p.excel_data === 'string' ? JSON.parse(p.excel_data) : p.excel_data;
+              Object.keys(eData).forEach(k => {
+                const match = k.match(/Col_(\d+)/);
+                if (match) {
+                  const idx = parseInt(match[1], 10);
+                  if (idx > maxColIdx) maxColIdx = idx;
+                }
+              });
+              const r = [];
+              for (let c = 0; c <= maxColIdx; c++) {
+                r.push(eData[`Col_${c}`] !== undefined ? String(eData[`Col_${c}`]) : '');
               }
-            });
-            const r = [];
-            for (let c = 0; c <= maxColIdx; c++) {
-              r.push(eData[`Col_${c}`] !== undefined ? String(eData[`Col_${c}`]) : '');
+              rows.push(r);
+            } catch (eErr) {
+              rows.push([
+                p.dummy_sr_no || '',
+                p.barcode || '',
+                p.part_code || '',
+                p.model || '',
+                p.box_no || '',
+                p.mfg_year ? String(p.mfg_year) : '',
+                p.status || '',
+                p.scrap_reason || ''
+              ]);
             }
-            rows.push(r);
           } else {
             rows.push([
               p.dummy_sr_no || '',
@@ -1612,7 +1645,31 @@ export const exportExcel = async (req, res) => {
     }
 
     if (!rawSheets) {
-      return res.status(400).json({ error: "No spreadsheet uploaded for this lot yet." });
+      // Final Fallback: Construct rawSheets from scan_logs
+      let scanLogsList = [];
+      if (isFallback()) {
+        scanLogsList = (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === lotId || sl.lot_id === rawLotId);
+      } else {
+        const sRes = await pool.query('SELECT * FROM scan_logs WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+        scanLogsList = sRes.rows;
+      }
+      if (scanLogsList.length > 0) {
+        const header = ["PCB Sr No", "Barcode", "Mfg Year", "Status"];
+        const rows = [header];
+        scanLogsList.forEach(sl => {
+          rows.push([
+            sl.dummy_sr_no || `PCB-${sl.row_idx + 1}`,
+            sl.actual_serial_no || '',
+            sl.mfg_year ? String(sl.mfg_year) : '',
+            sl.scrap === 'Yes' ? 'Scrap' : 'Repairable'
+          ]);
+        });
+        rawSheets = { "Sheet1": rows };
+      }
+    }
+
+    if (!rawSheets) {
+      return res.status(400).json({ error: "No spreadsheet or scan data found for this lot yet." });
     }
 
     // 1. Fetch Lot Info
