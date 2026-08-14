@@ -11,10 +11,11 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Read configuration from environment or defaults
-const connectionString = process.env.DATABASE_URL || 'postgresql://localhost:5432/electrolyte_db';
+const isLocalhost = connectionString.includes('localhost') || connectionString.includes('127.0.0.1');
 
 const pool = new pg.Pool({
   connectionString,
+  ssl: isLocalhost ? false : { rejectUnauthorized: false }
 });
 
 async function run() {
