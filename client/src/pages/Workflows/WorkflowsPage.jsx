@@ -479,7 +479,19 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
         setStep10Results(null);
       }
     }
-  }, [user, selectedProductionStep, productionLotId]);
+  }, [selectedProductionStep, productionLotId, user]);
+
+  useEffect(() => {
+    if (lotProductionStats) {
+      const options = getDropdownOptions();
+      if (options.length > 0) {
+        const exists = options.some(o => o.value === productionPcbType);
+        if (!exists) {
+          setProductionPcbType(options[0].value);
+        }
+      }
+    }
+  }, [lotProductionStats]);
 
 
   // Submit Step Log

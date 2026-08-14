@@ -581,7 +581,7 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
 
   // Render spreadsheet view when sheets exist
   if (sheetNames.length > 0) {
-    const renderedRows = activeSheetRows.slice(0, visibleRowsCount);
+    const renderedRows = activeSheetRows.slice(1, visibleRowsCount);
     
     return (
       <div className="glass-panel" style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 16, marginTop: 12 }}>
@@ -697,7 +697,8 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
               </tr>
             </thead>
             <tbody>
-              {renderedRows.map((row, rIdx) => {
+              {renderedRows.map((row, index) => {
+                const rIdx = index + 1;
                 // Determine barcode value for scrap check and year extraction
                 const rawBarcode = barcodeColIdx !== -1 ? row[barcodeColIdx] : '';
                 const baseBarcode = getCellValue(activeSheetName, rIdx, barcodeColIdx, rawBarcode);
