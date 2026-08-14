@@ -288,11 +288,13 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       const lot = (memoryDb.tables.lots || []).find(l => l.id === cleanLotId || l.lot_no === rawLotId);
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+      const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
 
       const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => (sl.lot_id === cleanLotId || sl.lot_id === rawLotId) && sl.timestamp);
       const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
       const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
       const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
+      const lotCellEdits = (memoryDb.tables.cell_edits || []).filter(e => e.lot_id === cleanLotId || e.lot_id === rawLotId);
 
       const panels = (memoryDb.tables.panels || []).filter(p => {
         if (p.lot_id !== cleanLotId && p.lot_id !== rawLotId) return false;
@@ -307,7 +309,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
                           scannedBarcodes.has(p.real_sr_no);
         if (!isScanned) return false;
 
-        if (p.status === 'Scrap' || p.status === 'Separate' || p.action === 'Scrap' || p.action === 'Separate') {
+        if (p.status === 'Scrap' || p.status === 'Separate' || p.status === 'Non-Repairable' || p.action === 'Scrap' || p.action === 'Separate') {
           return false;
         }
 
@@ -315,6 +317,17 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         if (mfgYear) {
           if (mfgYear <= scrapYear) return false;
           if (sepYear !== null && mfgYear === sepYear) return false;
+
+          if (chkYear !== null && mfgYear >= chkYear) {
+            const edit = lotCellEdits.find(e => Number(e.row_idx) === (p.sr_no - 1) && String(e.col_idx) === 'repairable');
+            let isRepairable = p.repairable;
+            if (edit) {
+              isRepairable = (edit.value === 'true' || edit.value === true);
+            }
+            if (isRepairable === false || isRepairable === 'false' || p.status === 'Non-Repairable') {
+              return false;
+            }
+          }
         }
 
         return true;
@@ -336,10 +349,11 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       return validScanCount;
     } else {
       try {
-        const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
+        const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold, checkbox_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
         const lot = lotRes.rows[0];
         const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
         const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+        const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
 
         const res = await pool.query(`
           SELECT COUNT(DISTINCT p.id)::integer 
@@ -349,11 +363,16 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
             (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
           )
+          LEFT JOIN cell_edits ce ON ce.lot_id = p.lot_id AND ce.row_idx = p.sr_no - 1 AND ce.col_idx = 'repairable'
           WHERE (p.lot_id = $1 OR p.lot_id = $4)
             AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
-            AND (p.status IS NULL OR (LOWER(p.status) NOT IN ('scrap', 'separate')))
+            AND (p.status IS NULL OR (LOWER(p.status) NOT IN ('scrap', 'separate', 'non-repairable')))
             AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $5))
-        `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear]);
+            AND (
+              p.mfg_year IS NULL OR p.mfg_year < $6 OR 
+              (ce.value = 'true' OR (ce.value IS NULL AND p.repairable IS NOT FALSE))
+            )
+        `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
         const count = res.rows[0].count;
         if (count > 0) return count;
@@ -370,11 +389,13 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         const lot = (memoryDb.tables.lots || []).find(l => l.id === cleanLotId || l.lot_no === rawLotId);
         const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
         const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+        const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
 
         const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => (sl.lot_id === cleanLotId || sl.lot_id === rawLotId) && sl.timestamp);
         const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
         const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
         const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
+        const lotCellEdits = (memoryDb.tables.cell_edits || []).filter(e => e.lot_id === cleanLotId || e.lot_id === rawLotId);
 
         const panels = (memoryDb.tables.panels || []).filter(p => {
           if (p.lot_id !== cleanLotId && p.lot_id !== rawLotId) return false;
@@ -386,11 +407,21 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
                             scannedBarcodes.has(p.barcode) ||
                             scannedBarcodes.has(p.real_sr_no);
           if (!isScanned) return false;
-          if (p.status === 'Scrap' || p.status === 'Separate' || p.action === 'Scrap' || p.action === 'Separate') return false;
+          if (p.status === 'Scrap' || p.status === 'Separate' || p.status === 'Non-Repairable' || p.action === 'Scrap' || p.action === 'Separate') return false;
           const mfgYear = p.mfg_year || extractMfgYear(p.barcode) || extractMfgYear(p.real_sr_no);
           if (mfgYear) {
             if (mfgYear <= scrapYear) return false;
             if (sepYear !== null && mfgYear === sepYear) return false;
+            if (chkYear !== null && mfgYear >= chkYear) {
+              const edit = lotCellEdits.find(e => Number(e.row_idx) === (p.sr_no - 1) && String(e.col_idx) === 'repairable');
+              let isRepairable = p.repairable;
+              if (edit) {
+                isRepairable = (edit.value === 'true' || edit.value === true);
+              }
+              if (isRepairable === false || isRepairable === 'false' || p.status === 'Non-Repairable') {
+                return false;
+              }
+            }
           }
           return true;
         });
@@ -970,7 +1001,11 @@ export const getLotProductionStats = async (req, res) => {
     stats.part_code_baselines = baselines;
 
     const partCodeCaps = {};
-    const partCodesList = Object.keys(partCodeCounts);
+    const partCodesList = new Set([
+      ...Object.keys(partCodeCounts),
+      ...(baselines || []).map(b => b.part_code),
+      'SA0010', 'SA0019', 'SA0021', 'SA0022', 'SA0011', 'SA0061', 'SA0060', 'SA0039', 'SA0038', 'SA0087'
+    ]);
     for (const pc of partCodesList) {
       if (pc) {
         partCodeCaps[pc] = {};
