@@ -108,27 +108,87 @@ const getPartCodeLimit = async (lotId, limitType, partCode) => {
   return 0;
 };
 
+const extractMfgYear = (serial) => {
+  if (!serial) return null;
+  const s = String(serial).trim();
+  const len = s.length;
+  if (s.startsWith('AT') && len <= 8) return null;
+  const matches = s.match(/[a-zA-Z](\d{2})/g);
+  if (matches) {
+    for (const m of matches) {
+      const yr = parseInt(m.substring(1), 10);
+      if (yr >= 10 && yr <= 50) return 2000 + yr;
+    }
+  }
+  if (len >= 4) {
+    const yrPart = s.substring(2, 4);
+    const yr = parseInt(yrPart, 10);
+    if (!isNaN(yr) && yr >= 10 && yr <= 50) return 2000 + yr;
+  }
+  if (len === 16 || len === 17) {
+    const yr = parseInt(s.substring(3, 5), 10);
+    if (!isNaN(yr)) return yr + 2000;
+  }
+  if (s.startsWith('AGV')) {
+    const cIndex = s.indexOf('C');
+    if (cIndex !== -1 && s.length > cIndex + 2) {
+      const yr = parseInt(s.substring(cIndex + 1, cIndex + 3), 10);
+      if (!isNaN(yr)) return yr + 2000;
+    }
+  }
+  return null;
+};
+
 const getStepOkSum = async (lotId, stepNo, partCode, okField) => {
+  const targetCode = String(partCode).trim().toUpperCase();
   if (isFallback()) {
-    const comLogs = memoryDb.tables.production_logs.filter(
+    const comLogs = (memoryDb.tables.production_logs || []).filter(
       l => l.lot_id === lotId && 
            l.step_no === stepNo && 
-           l.pcb_type.split(' - ')[0].trim() === partCode
+           l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode
+    );
+    const penLogs = (memoryDb.tables.pending_production_logs || []).filter(
+      l => l.lot_id === lotId && 
+           l.step_no === stepNo && 
+           l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode &&
+           l.approval_status !== 'Rejected'
     );
     let sum = 0;
     comLogs.forEach(l => {
       sum += parseInt(l.step_data[okField] || 0);
     });
+    penLogs.forEach(l => {
+      sum += parseInt(l.step_data[okField] || 0);
+    });
     return sum;
   }
 
-  const res = await pool.query(
-    `SELECT COALESCE(SUM((step_data->>$1)::integer), 0) AS total
-     FROM production_logs
-     WHERE lot_id = $2 AND step_no = $3 AND SPLIT_PART(pcb_type, ' - ', 1) = $4`,
-    [okField, lotId, stepNo, partCode]
-  );
-  return parseInt(res.rows[0].total || 0);
+  try {
+    const res = await pool.query(
+      `SELECT (
+         COALESCE((SELECT SUM((step_data->>$1)::integer) FROM production_logs WHERE lot_id = $2 AND step_no = $3 AND UPPER(TRIM(SPLIT_PART(pcb_type, ' - ', 1))) = $4), 0) +
+         COALESCE((SELECT SUM((step_data->>$1)::integer) FROM pending_production_logs WHERE lot_id = $2 AND step_no = $3 AND UPPER(TRIM(SPLIT_PART(pcb_type, ' - ', 1))) = $4 AND approval_status <> 'Rejected'), 0)
+       ) AS total`,
+      [okField, lotId, stepNo, targetCode]
+    );
+    return parseInt(res.rows[0]?.total || 0);
+  } catch (err) {
+    const comLogs = (memoryDb.tables.production_logs || []).filter(
+      l => l.lot_id === lotId && 
+           l.step_no === stepNo && 
+           l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode
+    );
+    const penLogs = (memoryDb.tables.pending_production_logs || []).filter(
+      l => l.lot_id === lotId && 
+           l.step_no === stepNo && 
+           l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode &&
+           l.approval_status !== 'Rejected'
+    );
+    let sum = 0;
+    comLogs.forEach(l => { sum += parseInt(l.step_data[okField] || 0); });
+    penLogs.forEach(l => { sum += parseInt(l.step_data[okField] || 0); });
+    return sum;
+  }
 };
 
 const getStep6AuditLimit = async (lotId, partCode) => {
@@ -141,13 +201,17 @@ const getStep6AuditLimit = async (lotId, partCode) => {
             (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
     ).length;
   } else {
-    const res = await pool.query(`
-      SELECT COUNT(*)::integer 
-      FROM checkpoint_scans cs 
-      JOIN panels p ON cs.panel_id = p.id 
-      WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND p.part_code = $2 AND cs.is_unknown = FALSE
-    `, [lotId, partCode]);
-    auditCount = res.rows[0].count;
+    try {
+      const res = await pool.query(`
+        SELECT COUNT(*)::integer 
+        FROM checkpoint_scans cs 
+        JOIN panels p ON cs.panel_id = p.id 
+        WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND p.part_code = $2 AND cs.is_unknown = FALSE
+      `, [lotId, partCode]);
+      auditCount = res.rows[0].count;
+    } catch (err) {
+      auditCount = 0;
+    }
   }
 
   if (auditCount === 0) {
@@ -166,13 +230,17 @@ const getStep10AuditLimit = async (lotId, partCode) => {
             (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
     ).length;
   } else {
-    const res = await pool.query(`
-      SELECT COUNT(*)::integer 
-      FROM checkpoint_scans cs 
-      JOIN panels p ON cs.panel_id = p.id 
-      WHERE cs.lot_id = $1 AND cs.checkpoint_step = 10 AND p.part_code = $2 AND cs.is_unknown = FALSE
-    `, [lotId, partCode]);
-    auditCount = res.rows[0].count;
+    try {
+      const res = await pool.query(`
+        SELECT COUNT(*)::integer 
+        FROM checkpoint_scans cs 
+        JOIN panels p ON cs.panel_id = p.id 
+        WHERE cs.lot_id = $1 AND cs.checkpoint_step = 10 AND p.part_code = $2 AND cs.is_unknown = FALSE
+      `, [lotId, partCode]);
+      auditCount = res.rows[0].count;
+    } catch (err) {
+      auditCount = 0;
+    }
   }
 
   if (auditCount === 0) {
@@ -183,56 +251,112 @@ const getStep10AuditLimit = async (lotId, partCode) => {
 
 export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
   const saMatch = String(partCode).match(/SA\d+/i);
-  const cleanPartCode = saMatch ? saMatch[0].toUpperCase() : partCode.split(' - ')[0].trim();
+  const cleanPartCode = saMatch ? saMatch[0].toUpperCase() : partCode.split(' - ')[0].trim().toUpperCase();
   const cleanLotId = parseInt(lotId, 10);
 
   if (stepNo === 2) {
     if (isFallback()) {
-      return memoryDb.tables.panels.filter(p => p.lot_id === cleanLotId && p.part_code === cleanPartCode).length;
+      return (memoryDb.tables.panels || []).filter(p => p.lot_id === cleanLotId && (p.part_code || '').trim().toUpperCase() === cleanPartCode).length;
     } else {
-      const res = await pool.query('SELECT COUNT(*)::integer FROM panels WHERE lot_id = $1 AND part_code = $2', [cleanLotId, cleanPartCode]);
-      return res.rows[0].count;
+      try {
+        const res = await pool.query('SELECT COUNT(*)::integer FROM panels WHERE lot_id = $1 AND UPPER(TRIM(part_code)) = $2', [cleanLotId, cleanPartCode]);
+        return res.rows[0].count;
+      } catch (err) {
+        return (memoryDb.tables.panels || []).filter(p => p.lot_id === cleanLotId && (p.part_code || '').trim().toUpperCase() === cleanPartCode).length;
+      }
     }
   }
 
   if (stepNo === 3) {
     if (isFallback()) {
-      const lot = memoryDb.tables.lots.find(l => l.id === cleanLotId);
+      const lot = (memoryDb.tables.lots || []).find(l => l.id === cleanLotId);
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
       const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-      const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === cleanLotId);
-      const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx));
+      const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === cleanLotId && sl.timestamp);
+      const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
       const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
+      const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
 
-      const panels = memoryDb.tables.panels.filter(p => 
-        p.lot_id === cleanLotId && 
-        (p.part_code === cleanPartCode || (p.part_code && p.part_code.includes(cleanPartCode))) &&
-        (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear)) &&
-        (scannedRowIndices.has(p.sr_no - 1) || scannedDummyNos.has(p.dummy_sr_no))
-      );
+      const panels = (memoryDb.tables.panels || []).filter(p => {
+        if (p.lot_id !== cleanLotId) return false;
+        
+        const pCode = (p.part_code || '').trim().toUpperCase();
+        if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
+
+        const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
+                          scannedRowIndices.has(p.sr_no) ||
+                          scannedDummyNos.has(p.dummy_sr_no) ||
+                          scannedBarcodes.has(p.barcode) ||
+                          scannedBarcodes.has(p.real_sr_no);
+        if (!isScanned) return false;
+
+        if (p.status === 'Scrap' || p.status === 'Separate' || p.action === 'Scrap' || p.action === 'Separate') {
+          return false;
+        }
+
+        const mfgYear = p.mfg_year || extractMfgYear(p.barcode) || extractMfgYear(p.real_sr_no);
+        if (mfgYear) {
+          if (mfgYear <= scrapYear) return false;
+          if (sepYear !== null && mfgYear === sepYear) return false;
+        }
+
+        return true;
+      });
 
       return panels.length;
     } else {
-      const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [cleanLotId]);
-      const lot = lotRes.rows[0];
-      const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
-      const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+      try {
+        const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [cleanLotId]);
+        const lot = lotRes.rows[0];
+        const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+        const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-      const res = await pool.query(`
-        SELECT COUNT(DISTINCT p.id)::integer 
-        FROM panels p
-        JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (
-          (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
-          (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
-          (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
-        )
-        WHERE p.lot_id = $1 
-          AND (p.part_code = $2 OR p.part_code ILIKE '%' || $2 || '%')
-          AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $4))
-      `, [cleanLotId, cleanPartCode, scrapYear, sepYear]);
+        const res = await pool.query(`
+          SELECT COUNT(DISTINCT p.id)::integer 
+          FROM panels p
+          JOIN scan_logs sl ON sl.lot_id = p.lot_id AND sl.timestamp IS NOT NULL AND (
+            (sl.row_idx IS NOT NULL AND (sl.row_idx = p.sr_no - 1 OR sl.row_idx = p.sr_no)) OR
+            (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
+            (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
+          )
+          WHERE p.lot_id = $1 
+            AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
+            AND (p.status IS NULL OR (LOWER(p.status) NOT IN ('scrap', 'separate')))
+            AND (p.mfg_year IS NULL OR (p.mfg_year > $3 AND p.mfg_year <> $4))
+        `, [cleanLotId, cleanPartCode, scrapYear, sepYear]);
 
-      return res.rows[0].count;
+        return res.rows[0].count;
+      } catch (dbErr) {
+        const lot = (memoryDb.tables.lots || []).find(l => l.id === cleanLotId);
+        const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
+        const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
+
+        const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === cleanLotId && sl.timestamp);
+        const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
+        const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
+        const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
+
+        const panels = (memoryDb.tables.panels || []).filter(p => {
+          if (p.lot_id !== cleanLotId) return false;
+          const pCode = (p.part_code || '').trim().toUpperCase();
+          if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
+          const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
+                            scannedRowIndices.has(p.sr_no) ||
+                            scannedDummyNos.has(p.dummy_sr_no) ||
+                            scannedBarcodes.has(p.barcode) ||
+                            scannedBarcodes.has(p.real_sr_no);
+          if (!isScanned) return false;
+          if (p.status === 'Scrap' || p.status === 'Separate' || p.action === 'Scrap' || p.action === 'Separate') return false;
+          const mfgYear = p.mfg_year || extractMfgYear(p.barcode) || extractMfgYear(p.real_sr_no);
+          if (mfgYear) {
+            if (mfgYear <= scrapYear) return false;
+            if (sepYear !== null && mfgYear === sepYear) return false;
+          }
+          return true;
+        });
+        return panels.length;
+      }
     }
   }
 

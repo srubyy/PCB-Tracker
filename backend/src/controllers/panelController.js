@@ -1879,16 +1879,34 @@ export const exportExcel = async (req, res) => {
               };
             });
           } else {
-            const logRes = await pool.query(
-              `SELECT pl.*, rs.step_no, rs.name as step_name, u.name as engineer_name
-               FROM panel_logs pl
-               JOIN repair_steps rs ON pl.step_id = rs.id
-               LEFT JOIN users u ON pl.engineer_id = u.id
-               JOIN panels p ON pl.panel_id = p.id
-               WHERE p.lot_id = $1 AND rs.step_no = ANY($2)`,
-              [lId, inScopeSteps]
-            );
-            panelLogs = logRes.rows;
+            try {
+              const logRes = await pool.query(
+                `SELECT pl.*, rs.step_no, rs.name as step_name, u.name as engineer_name
+                 FROM panel_logs pl
+                 JOIN repair_steps rs ON pl.step_id = rs.id
+                 LEFT JOIN users u ON pl.engineer_id = u.id
+                 JOIN panels p ON pl.panel_id = p.id
+                 WHERE p.lot_id = $1 AND rs.step_no = ANY($2::int[])`,
+                [lId, inScopeSteps]
+              );
+              panelLogs = logRes.rows;
+            } catch (err) {
+              panelLogs = (memoryDb.tables.panel_logs || []).filter(log => {
+                const p = panelMap.get(log.panel_id);
+                if (!p) return false;
+                const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+                const stepNoVal = stepObj ? stepObj.step_no : null;
+                return inScopeSteps.includes(stepNoVal);
+              }).map(log => {
+                const stepObj = (memoryDb.tables.repair_steps || []).find(rs => rs.id === log.step_id || rs.step_no === log.step_id);
+                return {
+                  ...log,
+                  step_no: stepObj ? stepObj.step_no : null,
+                  step_name: stepObj ? stepObj.name : 'Unknown',
+                  engineer_name: (memoryDb.tables.users || []).find(u => u.id === log.engineer_id)?.name || 'Unknown'
+                };
+              });
+            }
           }
 
           const partCodeExpectedMap = new Map();
@@ -1916,8 +1934,12 @@ export const exportExcel = async (req, res) => {
           if (isFallback()) {
             stepsList = (memoryDb.tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
           } else {
-            const stepsRes = await pool.query('SELECT * FROM repair_steps WHERE step_no = ANY($1) ORDER BY step_no', [inScopeSteps]);
-            stepsList = stepsRes.rows;
+            try {
+              const stepsRes = await pool.query('SELECT * FROM repair_steps WHERE step_no = ANY($1::int[]) ORDER BY step_no', [inScopeSteps]);
+              stepsList = stepsRes.rows;
+            } catch (err) {
+              stepsList = (memoryDb.tables.repair_steps || []).filter(rs => inScopeSteps.includes(rs.step_no));
+            }
           }
 
           const mismatchesList = [];

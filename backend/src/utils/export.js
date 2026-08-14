@@ -69,6 +69,9 @@ export const buildExportWorkbook = async (
 
   const headerFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1F4E78' } };
   const headerFont = { name: 'Arial', size: 10, bold: true, color: { argb: 'FFFFFFFF' } };
+  const virtualFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
+  const virtualFont = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1F4E78' } };
+  const normalFont = { name: 'Arial', size: 10 };
   const borderStyle = {
     top: { style: 'thin', color: { argb: 'FFD9D9D9' } },
     left: { style: 'thin', color: { argb: 'FFD9D9D9' } },
@@ -348,10 +351,6 @@ export const buildExportWorkbook = async (
 
     const headerRowObj = worksheet.addRow(finalHeader);
     headerRowObj.height = 25;
-
-    const virtualFill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD9E1F2' } };
-    const virtualFont = { name: 'Arial', size: 10, bold: true, color: { argb: 'FF1F4E78' } };
-    const normalFont = { name: 'Arial', size: 10 };
 
     for (let colIdx = 1; colIdx <= finalHeader.length; colIdx++) {
       const cell = worksheet.getCell(1, colIdx);
