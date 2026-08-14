@@ -872,33 +872,56 @@ const findColumnIndices = (sheetRows) => {
 
 export const initializeLotBaselines = async (lotId, clientTransaction = null) => {
   const db = clientTransaction || pool;
+  const cleanLotId = await resolveLotId(lotId);
+  const rawLotId = parseInt(lotId, 10);
+
   if (isFallback()) {
-    const lot = memoryDb.tables.lots.find(l => l.id === lotId);
+    const lot = memoryDb.tables.lots.find(l => l.id === cleanLotId || l.lot_no === rawLotId);
     const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
     const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-    // Delete unlocked baselines
+    const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => (sl.lot_id === cleanLotId || sl.lot_id === rawLotId) && sl.timestamp);
+    const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
+    const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
+    const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
+
+    // Delete unlocked baselines for this lot
     memoryDb.tables.lot_part_code_baselines = memoryDb.tables.lot_part_code_baselines.filter(
-      b => !(b.lot_id === lotId && b.locked === false)
+      b => !((b.lot_id === cleanLotId || b.lot_id === rawLotId) && b.locked === false)
     );
-    // Find panels in this lot and group by part_code (excluding scrap and separate)
-    const panels = memoryDb.tables.panels.filter(p => 
-      p.lot_id === lotId &&
-      (p.mfg_year === null || p.mfg_year === undefined || (p.mfg_year > scrapYear && p.mfg_year !== sepYear))
-    );
-    const groups = {};
-    panels.forEach(p => {
-      const pc = p.part_code || '';
-      if (pc) {
-        groups[pc] = (groups[pc] || 0) + 1;
-      }
+
+    // Find scanned panels in this lot and group by part_code
+    const scannedPanels = memoryDb.tables.panels.filter(p => {
+      if (p.lot_id !== cleanLotId && p.lot_id !== rawLotId) return false;
+      const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
+                        scannedRowIndices.has(p.sr_no) ||
+                        scannedDummyNos.has(p.dummy_sr_no) ||
+                        scannedBarcodes.has(p.barcode) ||
+                        scannedBarcodes.has(p.real_sr_no);
+      return isScanned;
     });
+
+    const groups = {};
+    if (scannedPanels.length > 0) {
+      scannedPanels.forEach(p => {
+        const pc = p.part_code || '';
+        if (pc) {
+          groups[pc] = (groups[pc] || 0) + 1;
+        }
+      });
+    } else {
+      lotScanLogs.forEach(sl => {
+        const pc = sl.actual_serial_no ? (sl.actual_serial_no.match(/SA\d+/i)?.[0]?.toUpperCase() || 'SA0010') : 'SA0010';
+        groups[pc] = (groups[pc] || 0) + 1;
+      });
+    }
+
     Object.entries(groups).forEach(([pc, qty]) => {
-      const exists = memoryDb.tables.lot_part_code_baselines.some(b => b.lot_id === lotId && b.part_code === pc);
+      const exists = memoryDb.tables.lot_part_code_baselines.some(b => (b.lot_id === cleanLotId || b.lot_id === rawLotId) && b.part_code === pc);
       if (!exists) {
         memoryDb.tables.lot_part_code_baselines.push({
           id: Date.now() + Math.random(),
-          lot_id: lotId,
+          lot_id: cleanLotId,
           part_code: pc,
           verified_qty: qty,
           locked: false
@@ -906,34 +929,33 @@ export const initializeLotBaselines = async (lotId, clientTransaction = null) =>
       }
     });
   } else {
-    const lotRes = await db.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1', [lotId]);
+    const lotRes = await db.query('SELECT scrap_year_threshold, separate_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
     const lot = lotRes.rows[0];
     const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
     const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
 
-    await db.query('DELETE FROM lot_part_code_baselines WHERE lot_id = $1 AND locked = false', [lotId]);
+    await db.query('DELETE FROM lot_part_code_baselines WHERE (lot_id = $1 OR lot_id = $2) AND locked = false', [cleanLotId, rawLotId]);
 
-    // Insert baselines per part code: strictly count scanned/edited timestamped valid repairable panels
+    // Insert baselines per part code: strictly count scanned timestamped panels
     await db.query(`
       INSERT INTO lot_part_code_baselines (lot_id, part_code, verified_qty, locked)
       SELECT 
-        p.lot_id, 
+        $1, 
         p.part_code, 
         COUNT(DISTINCT p.id)::integer AS verified_qty, 
         false
       FROM panels p
-      JOIN scan_logs sl ON sl.lot_id = p.lot_id AND (
-        (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
+      JOIN scan_logs sl ON (sl.lot_id = p.lot_id OR sl.lot_id = $2) AND sl.timestamp IS NOT NULL AND (
+        (sl.row_idx IS NOT NULL AND (sl.row_idx = p.sr_no - 1 OR sl.row_idx = p.sr_no)) OR
         (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
         (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
       )
-      WHERE p.lot_id = $1 
+      WHERE (p.lot_id = $1 OR p.lot_id = $2)
         AND p.part_code IS NOT NULL 
         AND p.part_code <> ''
-        AND (p.mfg_year IS NULL OR (p.mfg_year > $2 AND p.mfg_year <> $3))
-      GROUP BY p.lot_id, p.part_code
+      GROUP BY p.part_code
       ON CONFLICT (lot_id, part_code) DO UPDATE SET verified_qty = EXCLUDED.verified_qty
-    `, [lotId, scrapYear, sepYear]);
+    `, [cleanLotId, rawLotId]);
   }
 };
 
