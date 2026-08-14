@@ -140,25 +140,28 @@ const extractMfgYear = (serial) => {
 };
 
 const getStepOkSum = async (lotId, stepNo, partCode, okField) => {
-  const targetCode = String(partCode).trim().toUpperCase();
+  const targetCode = String(partCode).split(' - ')[0].trim().toUpperCase();
+  const cleanLotId = await resolveLotId(lotId);
+  const rawLotId = parseInt(lotId, 10);
+
   if (isFallback()) {
     const comLogs = (memoryDb.tables.production_logs || []).filter(
-      l => l.lot_id === lotId && 
+      l => (l.lot_id === cleanLotId || l.lot_id === rawLotId) && 
            l.step_no === stepNo && 
            l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode
     );
     const penLogs = (memoryDb.tables.pending_production_logs || []).filter(
-      l => l.lot_id === lotId && 
+      l => (l.lot_id === cleanLotId || l.lot_id === rawLotId) && 
            l.step_no === stepNo && 
            l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode &&
            l.approval_status !== 'Rejected'
     );
     let sum = 0;
     comLogs.forEach(l => {
-      sum += parseInt(l.step_data[okField] || 0);
+      sum += parseInt(l.step_data?.[okField] || 0);
     });
     penLogs.forEach(l => {
-      sum += parseInt(l.step_data[okField] || 0);
+      sum += parseInt(l.step_data?.[okField] || 0);
     });
     return sum;
   }
@@ -166,36 +169,43 @@ const getStepOkSum = async (lotId, stepNo, partCode, okField) => {
   try {
     const res = await pool.query(
       `SELECT (
-         COALESCE((SELECT SUM((step_data->>$1)::integer) FROM production_logs WHERE lot_id = $2 AND step_no = $3 AND UPPER(TRIM(SPLIT_PART(pcb_type, ' - ', 1))) = $4), 0) +
-         COALESCE((SELECT SUM((step_data->>$1)::integer) FROM pending_production_logs WHERE lot_id = $2 AND step_no = $3 AND UPPER(TRIM(SPLIT_PART(pcb_type, ' - ', 1))) = $4 AND approval_status <> 'Rejected'), 0)
+         COALESCE((SELECT SUM((step_data->>$1)::integer) FROM production_logs WHERE (lot_id = $2 OR lot_id = $5) AND step_no = $3 AND UPPER(TRIM(SPLIT_PART(pcb_type, ' - ', 1))) = $4), 0) +
+         COALESCE((SELECT SUM((step_data->>$1)::integer) FROM pending_production_logs WHERE (lot_id = $2 OR lot_id = $5) AND step_no = $3 AND UPPER(TRIM(SPLIT_PART(pcb_type, ' - ', 1))) = $4 AND approval_status <> 'Rejected'), 0)
        ) AS total`,
-      [okField, lotId, stepNo, targetCode]
+      [okField, cleanLotId, stepNo, targetCode, rawLotId]
     );
     return parseInt(res.rows[0]?.total || 0);
   } catch (err) {
     const comLogs = (memoryDb.tables.production_logs || []).filter(
-      l => l.lot_id === lotId && 
+      l => (l.lot_id === cleanLotId || l.lot_id === rawLotId) && 
            l.step_no === stepNo && 
            l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode
     );
     const penLogs = (memoryDb.tables.pending_production_logs || []).filter(
-      l => l.lot_id === lotId && 
+      l => (l.lot_id === cleanLotId || l.lot_id === rawLotId) && 
            l.step_no === stepNo && 
            l.pcb_type.split(' - ')[0].trim().toUpperCase() === targetCode &&
            l.approval_status !== 'Rejected'
     );
     let sum = 0;
-    comLogs.forEach(l => { sum += parseInt(l.step_data[okField] || 0); });
-    penLogs.forEach(l => { sum += parseInt(l.step_data[okField] || 0); });
+    comLogs.forEach(l => {
+      sum += parseInt(l.step_data?.[okField] || 0);
+    });
+    penLogs.forEach(l => {
+      sum += parseInt(l.step_data?.[okField] || 0);
+    });
     return sum;
   }
 };
 
 const getStep6AuditLimit = async (lotId, partCode) => {
   let auditCount = 0;
+  const cleanLotId = await resolveLotId(lotId);
+  const rawLotId = parseInt(lotId, 10);
+
   if (isFallback()) {
     auditCount = (memoryDb.tables.checkpoint_scans || []).filter(
-      cs => cs.lot_id === lotId && 
+      cs => (cs.lot_id === cleanLotId || cs.lot_id === rawLotId) && 
             cs.checkpoint_step === 6 && 
             !cs.is_unknown && 
             (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
@@ -206,8 +216,8 @@ const getStep6AuditLimit = async (lotId, partCode) => {
         SELECT COUNT(*)::integer 
         FROM checkpoint_scans cs 
         JOIN panels p ON cs.panel_id = p.id 
-        WHERE cs.lot_id = $1 AND cs.checkpoint_step = 6 AND p.part_code = $2 AND cs.is_unknown = FALSE
-      `, [lotId, partCode]);
+        WHERE (cs.lot_id = $1 OR cs.lot_id = $3) AND cs.checkpoint_step = 6 AND p.part_code = $2 AND cs.is_unknown = FALSE
+      `, [cleanLotId, partCode, rawLotId]);
       auditCount = res.rows[0].count;
     } catch (err) {
       auditCount = 0;
@@ -222,9 +232,12 @@ const getStep6AuditLimit = async (lotId, partCode) => {
 
 const getStep10AuditLimit = async (lotId, partCode) => {
   let auditCount = 0;
+  const cleanLotId = await resolveLotId(lotId);
+  const rawLotId = parseInt(lotId, 10);
+
   if (isFallback()) {
     auditCount = (memoryDb.tables.checkpoint_scans || []).filter(
-      cs => cs.lot_id === lotId && 
+      cs => (cs.lot_id === cleanLotId || cs.lot_id === rawLotId) && 
             cs.checkpoint_step === 10 && 
             !cs.is_unknown && 
             (memoryDb.tables.panels || []).find(p => p.id === cs.panel_id)?.part_code === partCode
@@ -235,8 +248,8 @@ const getStep10AuditLimit = async (lotId, partCode) => {
         SELECT COUNT(*)::integer 
         FROM checkpoint_scans cs 
         JOIN panels p ON cs.panel_id = p.id 
-        WHERE cs.lot_id = $1 AND cs.checkpoint_step = 10 AND p.part_code = $2 AND cs.is_unknown = FALSE
-      `, [lotId, partCode]);
+        WHERE (cs.lot_id = $1 OR cs.lot_id = $3) AND cs.checkpoint_step = 10 AND p.part_code = $2 AND cs.is_unknown = FALSE
+      `, [cleanLotId, partCode, rawLotId]);
       auditCount = res.rows[0].count;
     } catch (err) {
       auditCount = 0;
