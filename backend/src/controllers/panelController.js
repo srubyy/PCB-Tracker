@@ -1343,20 +1343,6 @@ export const getExcelData = async (req, res) => {
     console.error('Error fetching lot_raw_sheets:', err);
   }
 
-  if (!sheets || Object.keys(sheets).length === 0) {
-    let finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
-    if (!fs.existsSync(finalJsonPath)) {
-      finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
-    }
-    if (fs.existsSync(finalJsonPath)) {
-      try {
-        sheets = JSON.parse(fs.readFileSync(finalJsonPath, 'utf8'));
-      } catch (e) {
-        console.error(e);
-      }
-    }
-  }
-
   let edits = [];
   try {
     if (isFallback()) {
