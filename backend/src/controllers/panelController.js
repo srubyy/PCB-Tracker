@@ -1133,10 +1133,11 @@ export const uploadExcel = async (req, res) => {
 
 export const getExcelData = async (req, res) => {
   const { id } = req.params;
-  const lotId = parseInt(id, 10);
-  if (isNaN(lotId)) {
+  const rawLotId = parseInt(id, 10);
+  if (isNaN(rawLotId)) {
     return res.status(400).json({ error: "Invalid lot ID." });
   }
+  const lotId = await resolveLotId(rawLotId);
 
   const formatLocalTime = (dateInput) => {
     if (!dateInput) return '';
@@ -1224,7 +1225,10 @@ export const getExcelData = async (req, res) => {
     return processed;
   };
 
-  const finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+  let finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+  if (!fs.existsSync(finalJsonPath)) {
+    finalJsonPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
+  }
   let sheets = {};
   if (fs.existsSync(finalJsonPath)) {
     try {
@@ -1237,9 +1241,9 @@ export const getExcelData = async (req, res) => {
   let edits = [];
   try {
     if (isFallback()) {
-      edits = memoryDb.tables.cell_edits.filter(e => e.lot_id === lotId);
+      edits = memoryDb.tables.cell_edits.filter(e => e.lot_id === lotId || e.lot_id === rawLotId);
     } else {
-      const dbRes = await pool.query('SELECT * FROM cell_edits WHERE lot_id = $1', [lotId]);
+      const dbRes = await pool.query('SELECT * FROM cell_edits WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
       edits = dbRes.rows;
     }
   } catch (err) {
@@ -1250,15 +1254,15 @@ export const getExcelData = async (req, res) => {
   try {
     if (isFallback()) {
       scanLogs = memoryDb.tables.scan_logs
-        .filter(e => e.lot_id === lotId)
+        .filter(e => e.lot_id === lotId || e.lot_id === rawLotId)
         .map(e => ({
           ...e,
           timestamp: formatLocalTime(e.timestamp)
         }));
     } else {
       const scansRes = await pool.query(
-        "SELECT timestamp, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, sheet_name, row_idx FROM scan_logs WHERE lot_id = $1 ORDER BY timestamp ASC",
-        [lotId]
+        "SELECT timestamp, dummy_sr_no, actual_serial_no, mfg_year, scrap, scanned_by, session_export_batch, sheet_name, row_idx FROM scan_logs WHERE lot_id = $1 OR lot_id = $2 ORDER BY timestamp ASC",
+        [lotId, rawLotId]
       );
       scanLogs = scansRes.rows.map(s => ({
         ...s,
@@ -1271,7 +1275,7 @@ export const getExcelData = async (req, res) => {
 
   let lot = null;
   try {
-    lot = await Lot.findById(lotId);
+    lot = await Lot.findById(lotId) || await Lot.findById(rawLotId);
   } catch (err) {
     console.error(err);
   }
@@ -1282,17 +1286,21 @@ export const getExcelData = async (req, res) => {
 
 export const saveCellEdit = async (req, res) => {
   const { id } = req.params;
-  const lotId = parseInt(id, 10);
+  const rawLotId = parseInt(id, 10);
+  if (isNaN(rawLotId)) {
+    return res.status(400).json({ error: "Missing required fields." });
+  }
+  const lotId = await resolveLotId(rawLotId);
   const { sheet_name, row_idx, col_idx, value } = req.body;
 
-  if (isNaN(lotId) || !sheet_name || row_idx === undefined || col_idx === undefined) {
+  if (!sheet_name || row_idx === undefined || col_idx === undefined) {
     return res.status(400).json({ error: "Missing required fields." });
   }
 
   try {
     if (isFallback()) {
       const existingIdx = memoryDb.tables.cell_edits.findIndex(e => 
-        e.lot_id === lotId && e.sheet_name === sheet_name && e.row_idx === row_idx && String(e.col_idx) === String(col_idx)
+        (e.lot_id === lotId || e.lot_id === rawLotId) && e.sheet_name === sheet_name && e.row_idx === row_idx && String(e.col_idx) === String(col_idx)
       );
       const editObj = { lot_id: lotId, sheet_name, row_idx, col_idx: String(col_idx), value };
       if (existingIdx !== -1) {
@@ -1302,8 +1310,8 @@ export const saveCellEdit = async (req, res) => {
       }
     } else {
       const existing = await pool.query(
-        'SELECT id FROM cell_edits WHERE lot_id = $1 AND sheet_name = $2 AND row_idx = $3 AND col_idx = $4',
-        [lotId, sheet_name, parseInt(row_idx, 10), String(col_idx)]
+        'SELECT id FROM cell_edits WHERE (lot_id = $1 OR lot_id = $5) AND sheet_name = $2 AND row_idx = $3 AND col_idx = $4',
+        [lotId, sheet_name, parseInt(row_idx, 10), String(col_idx), rawLotId]
       );
       if (existing.rows.length > 0) {
         await pool.query(
