@@ -1118,6 +1118,12 @@ export const uploadExcel = async (req, res) => {
 
       fs.writeFileSync(finalJsonPath, JSON.stringify(sheets), 'utf8');
 
+      // Save uploaded sheet JSON to disk for fallback persistence
+      const sheetDiskPath = path.join(uploadsDir, `lot_${lotId}_sheet.json`);
+      const rawSheetDiskPath = path.join(uploadsDir, `lot_${rawLotId}_sheet.json`);
+      fs.writeFileSync(sheetDiskPath, JSON.stringify(sheets), 'utf8');
+      try { fs.writeFileSync(rawSheetDiskPath, JSON.stringify(sheets), 'utf8'); } catch (e) {}
+
       // PURGE ALL OLD DATA FOR THIS LOT WHEN A NEW EXCEL IS LOADED
       if (isFallback()) {
         memoryDb.tables.lot_raw_sheets = (memoryDb.tables.lot_raw_sheets || []).filter(s => s.lot_id !== lotId && s.lot_id !== rawLotId);
@@ -1331,6 +1337,19 @@ export const getExcelData = async (req, res) => {
       const sheetRec = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId || s.lot_id === rawLotId);
       if (sheetRec && sheetRec.raw_json) {
         sheets = typeof sheetRec.raw_json === 'string' ? JSON.parse(sheetRec.raw_json) : sheetRec.raw_json;
+      } else {
+        const diskPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_sheet.json`);
+        const rawDiskPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_sheet.json`);
+        const targetPath = fs.existsSync(diskPath) ? diskPath : (fs.existsSync(rawDiskPath) ? rawDiskPath : null);
+        if (targetPath) {
+          try {
+            sheets = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+            if (sheets && Object.keys(sheets).length > 0) {
+              memoryDb.tables.lot_raw_sheets = (memoryDb.tables.lot_raw_sheets || []).filter(s => s.lot_id !== lotId && s.lot_id !== rawLotId);
+              memoryDb.tables.lot_raw_sheets.push({ lot_id: lotId, raw_json: JSON.stringify(sheets) });
+            }
+          } catch (e) {}
+        }
       }
     } else {
       const sheetRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
