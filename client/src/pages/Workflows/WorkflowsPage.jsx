@@ -293,13 +293,10 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     ];
 
     if (!lotProductionStats || !lotProductionStats.part_code_baselines || lotProductionStats.part_code_baselines.length === 0) {
-      return defaultOptions.map(opt => ({
-        value: `${opt.code} - ${opt.name}`,
-        label: `${opt.code} — ${opt.name}`
-      }));
+      return [];
     }
 
-    const activeBaselines = (lotProductionStats.part_code_baselines || []).filter(b => b.verified_qty > 0);
+    const activeBaselines = (lotProductionStats.part_code_baselines || []).filter(b => Number(b.verified_qty) > 0);
     const baselinesToUse = activeBaselines.length > 0 ? activeBaselines : lotProductionStats.part_code_baselines;
 
     return baselinesToUse.map(base => {

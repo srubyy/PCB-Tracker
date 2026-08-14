@@ -561,8 +561,8 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
 
   const columns = [];
   for (let c = 0; c < numColumns; c++) {
-    const letter = getColumnLetter(c);
-    columns.push({ index: c, type: 'excel', label: letter });
+    const headerName = (activeSheetRows[0] && activeSheetRows[0][c]) ? String(activeSheetRows[0][c]).trim() : getColumnLetter(c);
+    columns.push({ index: c, type: 'excel', label: headerName || getColumnLetter(c) });
     if (c === dummyColIdx) {
       columns.push({ index: 'actual_serial_no', type: 'actual_serial_no', label: 'Actual Serial No' });
       columns.push({ index: 'barcode_length', type: 'barcode_length', label: 'Length of Actual Serial No' });
