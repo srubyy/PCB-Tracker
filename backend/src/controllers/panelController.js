@@ -1079,10 +1079,11 @@ const syncExcelPanels = async (lotId, sheets) => {
 
 export const uploadExcel = async (req, res) => {
   const { id } = req.params;
-  const lotId = parseInt(id, 10);
-  if (isNaN(lotId)) {
+  const rawLotId = parseInt(id, 10);
+  if (isNaN(rawLotId)) {
     return res.status(400).json({ error: "Invalid lot ID." });
   }
+  const lotId = await resolveLotId(rawLotId);
 
   const uploadsDir = path.join(process.cwd(), 'uploads');
   if (!fs.existsSync(uploadsDir)) {
@@ -1091,6 +1092,7 @@ export const uploadExcel = async (req, res) => {
 
   const tempFilePath = path.join(uploadsDir, `lot_${lotId}_temp.xlsx`);
   const finalJsonPath = path.join(uploadsDir, `lot_${lotId}_raw.json`);
+  const rawJsonPath = path.join(uploadsDir, `lot_${rawLotId}_raw.json`);
 
   const fileStream = fs.createWriteStream(tempFilePath);
   req.pipe(fileStream);
@@ -1101,9 +1103,7 @@ export const uploadExcel = async (req, res) => {
       const sheets = {};
       workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
-        // Convert to 2D array
         const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
-        // Format exactly as the python parser did: all cells as strings
         const cleanedRows = rows.map(row => 
           row.map(val => (val !== undefined && val !== null) ? String(val).trim() : '')
         );
@@ -1112,34 +1112,40 @@ export const uploadExcel = async (req, res) => {
 
       try { fs.unlinkSync(tempFilePath); } catch (e) {}
 
+      // Delete any previous raw json files for this lot
+      try { if (fs.existsSync(finalJsonPath)) fs.unlinkSync(finalJsonPath); } catch (e) {}
+      try { if (fs.existsSync(rawJsonPath)) fs.unlinkSync(rawJsonPath); } catch (e) {}
+
       fs.writeFileSync(finalJsonPath, JSON.stringify(sheets), 'utf8');
 
+      // PURGE ALL OLD DATA FOR THIS LOT WHEN A NEW EXCEL IS LOADED
       if (isFallback()) {
-        memoryDb.tables.lot_raw_sheets = memoryDb.tables.lot_raw_sheets || [];
-        const existingIdx = memoryDb.tables.lot_raw_sheets.findIndex(s => s.lot_id === lotId);
-        if (existingIdx !== -1) {
-          memoryDb.tables.lot_raw_sheets[existingIdx].raw_json = JSON.stringify(sheets);
-        } else {
-          memoryDb.tables.lot_raw_sheets.push({ lot_id: lotId, raw_json: JSON.stringify(sheets) });
-        }
-      } else {
-        await pool.query(`
-          INSERT INTO lot_raw_sheets (lot_id, raw_json)
-          VALUES ($1, $2)
-          ON CONFLICT (lot_id)
-          DO UPDATE SET raw_json = $2
-        `, [lotId, JSON.stringify(sheets)]);
-      }
+        memoryDb.tables.lot_raw_sheets = (memoryDb.tables.lot_raw_sheets || []).filter(s => s.lot_id !== lotId && s.lot_id !== rawLotId);
+        memoryDb.tables.lot_raw_sheets.push({ lot_id: lotId, raw_json: JSON.stringify(sheets) });
 
-      if (isFallback()) {
-        memoryDb.tables.cell_edits = memoryDb.tables.cell_edits.filter(e => e.lot_id !== lotId);
+        memoryDb.tables.cell_edits = (memoryDb.tables.cell_edits || []).filter(e => e.lot_id !== lotId && e.lot_id !== rawLotId);
+        memoryDb.tables.scan_logs = (memoryDb.tables.scan_logs || []).filter(s => s.lot_id !== lotId && s.lot_id !== rawLotId);
+        memoryDb.tables.panels = (memoryDb.tables.panels || []).filter(p => p.lot_id !== lotId && p.lot_id !== rawLotId);
+        memoryDb.tables.lot_part_code_baselines = (memoryDb.tables.lot_part_code_baselines || []).filter(b => b.lot_id !== lotId && b.lot_id !== rawLotId);
+        memoryDb.tables.export_history = (memoryDb.tables.export_history || []).filter(e => e.lot_id !== lotId && e.lot_id !== rawLotId);
       } else {
-        await pool.query('DELETE FROM cell_edits WHERE lot_id = $1', [lotId]);
+        await pool.query('DELETE FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+        await pool.query('INSERT INTO lot_raw_sheets (lot_id, raw_json) VALUES ($1, $2)', [lotId, JSON.stringify(sheets)]);
+        await pool.query('DELETE FROM cell_edits WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+        await pool.query('DELETE FROM scan_logs WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+        await pool.query('DELETE FROM panels WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+        await pool.query('DELETE FROM lot_part_code_baselines WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+        await pool.query('DELETE FROM export_history WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
       }
 
       await syncExcelPanels(lotId, sheets);
+      await initializeLotBaselines(lotId);
 
-      res.json({ success: true, message: "Imported Excel file successfully." });
+      if (isFallback()) {
+        memoryDb.saveSnapshot();
+      }
+
+      res.json({ success: true, message: "Imported fresh Excel file successfully and cleared previous excel data." });
     } catch (ex) {
       console.error('Upload handler error:', ex);
       try { fs.unlinkSync(tempFilePath); } catch (e) {}
