@@ -206,7 +206,7 @@ export const loadSnapshot = () => {
     console.error('Failed to load memoryDb snapshot:', err.message);
   }
   return false;
-};
+}
 
 export function initializeMemoryDb() {
   tables.client_part_codes = [
@@ -218,15 +218,13 @@ export function initializeMemoryDb() {
     { id: 6, client_id: 2, part_code: 'SA0061', name: 'GV3 Power PCB White' },
     { id: 7, client_id: 2, part_code: 'SA0060', name: 'GV3 Power PCB Black' },
     { id: 8, client_id: 2, part_code: 'SA0039', name: 'GV4 Studio+ Remote 1200mm' },
-    { id: 9, client_id: 2, part_code: 'SA0038', name: 'GV4 Alpha PCB_Regulator_1200mm' },
-    { id: 10, client_id: 2, part_code: 'SA0087', name: 'GV4 Ozeo PCB_Main_1200mm' }
+    { id: 9, client_id: 2, part_code: 'SA0087', name: 'GV4 Ozeo PCB_Main_1200mm' }
   ];
 
-  console.log('----------------------------------------------------');
-  console.log('📁 Pre-seeding memory database from seed_new.sql...');
-  console.log('----------------------------------------------------');
+  // 1. Load memory snapshot from disk if present
+  const hasSnapshot = loadSnapshot();
 
-  // Try multiple fallback paths for finding the seed_new.sql dynamically
+  // 2. Pre-seed default structures from seed_new.sql
   let seedPath = path.join(process.cwd(), 'backend', 'seed_new.sql');
   if (!fs.existsSync(seedPath)) {
     seedPath = path.join(process.cwd(), 'seed_new.sql');
@@ -239,52 +237,43 @@ export function initializeMemoryDb() {
   if (fs.existsSync(seedPath)) {
     const seedSql = fs.readFileSync(seedPath, 'utf8');
     const lines = seedSql.split('\n');
-    let insertCount = 0;
     for (const line of lines) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith('--')) continue;
       if (trimmed.startsWith('INSERT INTO ')) {
         try {
+          if (hasSnapshot && tables.lots.length > 0 && trimmed.startsWith('INSERT INTO lots ')) {
+            continue;
+          }
           parseInsertLine(trimmed);
-          insertCount++;
         } catch (e) {
           // Silent catch
         }
       }
     }
-    // Map status values and ensure default year threshold rules for all pre-seeded lots
-    tables.lots.forEach(lot => {
-      if (lot.status === 'In Process') {
-        lot.status = 'Active';
-      } else if (lot.status === 'Complete') {
-        lot.status = 'Closed';
-      }
-      if (lot.scrap_year_threshold === null || lot.scrap_year_threshold === undefined) lot.scrap_year_threshold = 2021;
-      if (lot.separate_year_threshold === null || lot.separate_year_threshold === undefined) lot.separate_year_threshold = 2022;
-      if (lot.checkbox_year_threshold === null || lot.checkbox_year_threshold === undefined) lot.checkbox_year_threshold = 2023;
-    });
-
-    // Load persistent disk snapshot overlay (preserving company lots and custom mfg year rules across restarts)
-    loadSnapshot();
-
-    tables.lots.forEach(lot => {
-      if (lot.scrap_year_threshold === null || lot.scrap_year_threshold === undefined) lot.scrap_year_threshold = 2021;
-      if (lot.separate_year_threshold === null || lot.separate_year_threshold === undefined) lot.separate_year_threshold = 2022;
-      if (lot.checkbox_year_threshold === null || lot.checkbox_year_threshold === undefined) lot.checkbox_year_threshold = 2023;
-    });
-
-    console.log(`✅ Loaded seed data successfully: parsed ${insertCount} INSERT statements.`);
-    console.log(`📊 In-memory stats:`);
-    console.log(`   - Clients: ${tables.clients.length}`);
-    console.log(`   - Users: ${tables.users.length}`);
-    console.log(`   - Lots: ${tables.lots.length}`);
-    console.log(`   - Panels: ${tables.panels.length}`);
-    console.log(`   - Panel Logs: ${tables.panel_logs.length}`);
-    console.log(`   - Defect Codes: ${tables.defect_codes.length}`);
-    console.log('----------------------------------------------------');
-  } else {
-    console.log('⚠️  seed_new.sql not found! Running with empty database.');
   }
+
+  // 3. Ensure pre-existing lots (17, 18, 19, 20) always exist alongside newly created lots
+  const seedLots = [
+    { id: 1, lot_no: 17, batch_no: 'DX128', pixel_pitch: 'P5.9', client_id: 1, qty_sent: 260, received_qty: 0, status: 'Active', scrap_year_threshold: 2021, separate_year_threshold: 2022, checkbox_year_threshold: 2023 },
+    { id: 2, lot_no: 18, batch_no: 'DX128', pixel_pitch: 'P5.9', client_id: 2, qty_sent: 200, received_qty: 0, status: 'Active', scrap_year_threshold: 2021, separate_year_threshold: 2022, checkbox_year_threshold: 2023 },
+    { id: 3, lot_no: 19, batch_no: 'DX128', pixel_pitch: 'P5.9', client_id: 1, qty_sent: 500, received_qty: 0, status: 'Active', scrap_year_threshold: 2021, separate_year_threshold: 2022, checkbox_year_threshold: 2023 },
+    { id: 4, lot_no: 20, batch_no: 'DX109', pixel_pitch: 'P5.9', client_id: 2, qty_sent: 50, received_qty: 0, status: 'Active', scrap_year_threshold: 2021, separate_year_threshold: 2022, checkbox_year_threshold: 2023 }
+  ];
+
+  seedLots.forEach(sLot => {
+    if (!tables.lots.some(l => l.lot_no === sLot.lot_no || l.id === sLot.id)) {
+      tables.lots.push(sLot);
+    }
+  });
+
+  tables.lots.forEach(lot => {
+    if (lot.scrap_year_threshold === null || lot.scrap_year_threshold === undefined) lot.scrap_year_threshold = 2021;
+    if (lot.separate_year_threshold === null || lot.separate_year_threshold === undefined) lot.separate_year_threshold = 2022;
+    if (lot.checkbox_year_threshold === null || lot.checkbox_year_threshold === undefined) lot.checkbox_year_threshold = 2023;
+  });
+
+  saveSnapshot();
 }
 
 // --- Data CRUD Operations (Exposed for Repository Models) ---
