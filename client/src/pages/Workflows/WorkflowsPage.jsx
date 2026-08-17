@@ -312,10 +312,10 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
 
     return baselinesToUse.map(base => {
       const name = presetPartCodeNames[base.part_code] || base.part_code;
-      const optionVal = `${base.part_code} - ${name}`;
+      const cleanCode = base.part_code;
       return {
-        value: optionVal,
-        label: `${base.part_code} - ${base.verified_qty} verified (${name})`
+        value: cleanCode,
+        label: `${cleanCode} - ${base.verified_qty} verified (${name})`
       };
     });
   };
@@ -497,13 +497,18 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     if (lotProductionStats) {
       const options = getDropdownOptions();
       if (options.length > 0) {
-        const exists = options.some(o => o.value === productionPcbType);
-        if (!exists) {
+        const cleanCurrent = (String(productionPcbType || '').match(/SA\d+/i) || [])[0]?.toUpperCase() || String(productionPcbType || '').split(' - ')[0].trim().toUpperCase();
+        const matchingOpt = options.find(o => o.value === cleanCurrent || o.value.includes(cleanCurrent));
+        if (matchingOpt) {
+          if (productionPcbType !== matchingOpt.value) {
+            setProductionPcbType(matchingOpt.value);
+          }
+        } else {
           setProductionPcbType(options[0].value);
         }
       }
     }
-  }, [lotProductionStats]);
+  }, [lotProductionStats, productionLotId]);
 
 
   // Submit Step Log

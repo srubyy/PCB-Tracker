@@ -406,7 +406,19 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         return true;
       });
 
-      return panels.length;
+      if (panels.length > 0) return panels.length;
+
+      let validScanCount = 0;
+      lotScanLogs.forEach(sl => {
+        const mfgYear = sl.mfg_year || extractMfgYear(sl.actual_serial_no);
+        if (mfgYear) {
+          if (mfgYear <= scrapYear) return;
+          if (sepYear !== null && mfgYear === sepYear) return;
+        }
+        if (sl.scrap === 'Yes' || sl.scrap === 'Separate') return;
+        validScanCount++;
+      });
+      return validScanCount;
     } else {
       try {
         const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold, checkbox_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
@@ -435,7 +447,17 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             AND (ce.value IS DISTINCT FROM 'false')
         `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
-        return res.rows[0].count;
+        const dbCount = res.rows[0].count;
+        if (dbCount > 0) return dbCount;
+
+        const scanRes = await pool.query(`
+          SELECT COUNT(DISTINCT id)::integer
+          FROM scan_logs
+          WHERE (lot_id = $1 OR lot_id = $4) AND timestamp IS NOT NULL
+            AND (scrap IS NULL OR scrap <> 'Yes')
+            AND (mfg_year IS NULL OR (mfg_year > $2 AND mfg_year <> $3))
+        `, [cleanLotId, scrapYear, sepYear, rawLotId]);
+        return scanRes.rows[0].count;
       } catch (dbErr) {
         return 0;
       }
