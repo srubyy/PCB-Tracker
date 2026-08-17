@@ -1249,6 +1249,14 @@ export const getExcelData = async (req, res) => {
     return { dateStr, timeStr };
   };
 
+  const formatLocalTime = (dateInput) => {
+    if (!dateInput) return '';
+    const dObj = new Date(dateInput);
+    if (isNaN(dObj.getTime())) return String(dateInput);
+    const pad = (num) => String(num).padStart(2, '0');
+    return `${dObj.getFullYear()}-${pad(dObj.getMonth() + 1)}-${pad(dObj.getDate())} ${pad(dObj.getHours())}:${pad(dObj.getMinutes())}:${pad(dObj.getSeconds())}`;
+  };
+
   const processSheets = (sheetsObj, logsList) => {
     if (!sheetsObj) return {};
     const processed = {};
