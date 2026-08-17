@@ -1352,14 +1352,10 @@ export const getExcelData = async (req, res) => {
       const rawDiskPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_sheet.json`);
       const diskRawPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
       const rawDiskRawPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
-      const seedPath1 = path.join(process.cwd(), 'backend', 'seed_data', `lot_${lotId}_sheet.json`);
-      const seedPath2 = path.join(process.cwd(), 'backend', 'seed_data', `lot_${rawLotId}_sheet.json`);
       const targetPath = fs.existsSync(diskPath) ? diskPath : 
                         (fs.existsSync(rawDiskPath) ? rawDiskPath : 
                         (fs.existsSync(diskRawPath) ? diskRawPath : 
-                        (fs.existsSync(rawDiskRawPath) ? rawDiskRawPath : 
-                        (fs.existsSync(seedPath1) ? seedPath1 : 
-                        (fs.existsSync(seedPath2) ? seedPath2 : null)))));
+                        (fs.existsSync(rawDiskRawPath) ? rawDiskRawPath : null)));
       if (targetPath) {
         try {
           sheets = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
