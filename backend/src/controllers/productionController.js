@@ -406,19 +406,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         return true;
       });
 
-      if (panels.length > 0) return panels.length;
-
-      let validScanCount = 0;
-      lotScanLogs.forEach(sl => {
-        const mfgYear = sl.mfg_year || extractMfgYear(sl.actual_serial_no);
-        if (mfgYear) {
-          if (mfgYear <= scrapYear) return;
-          if (sepYear !== null && mfgYear === sepYear) return;
-        }
-        if (sl.scrap === 'Yes' || sl.scrap === 'Separate') return;
-        validScanCount++;
-      });
-      return validScanCount;
+      return panels.length;
     } else {
       try {
         const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold, checkbox_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
@@ -447,70 +435,9 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             AND (ce.value IS DISTINCT FROM 'false')
         `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
-        const count = res.rows[0].count;
-        if (count > 0) return count;
-
-        const scanRes = await pool.query(`
-          SELECT COUNT(DISTINCT id)::integer
-          FROM scan_logs
-          WHERE (lot_id = $1 OR lot_id = $4) AND timestamp IS NOT NULL
-            AND (scrap IS NULL OR scrap <> 'Yes')
-            AND (mfg_year IS NULL OR (mfg_year > $2 AND mfg_year <> $3))
-        `, [cleanLotId, scrapYear, sepYear, rawLotId]);
-        return scanRes.rows[0].count;
+        return res.rows[0].count;
       } catch (dbErr) {
-        const lot = (memoryDb.tables.lots || []).find(l => l.id === cleanLotId || l.lot_no === rawLotId);
-        const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
-        const sepYear = lot && lot.separate_year_threshold !== null ? lot.separate_year_threshold : 2022;
-        const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
-
-        const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => (sl.lot_id === cleanLotId || sl.lot_id === rawLotId) && sl.timestamp);
-        const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
-        const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
-        const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
-        const lotCellEdits = (memoryDb.tables.cell_edits || []).filter(e => e.lot_id === cleanLotId || e.lot_id === rawLotId);
-
-        const panels = (memoryDb.tables.panels || []).filter(p => {
-          if (p.lot_id !== cleanLotId && p.lot_id !== rawLotId) return false;
-          const pCode = (p.part_code || '').trim().toUpperCase();
-          if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
-          const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
-                            scannedDummyNos.has(p.dummy_sr_no) ||
-                            scannedBarcodes.has(p.barcode) ||
-                            scannedBarcodes.has(p.real_sr_no);
-          if (!isScanned) return false;
-          if (p.status === 'Scrap' || p.status === 'Separate' || p.status === 'Non-Repairable' || p.action === 'Scrap' || p.action === 'Separate') return false;
-          const mfgYear = p.mfg_year || extractMfgYear(p.barcode) || extractMfgYear(p.real_sr_no);
-          if (mfgYear) {
-            if (mfgYear <= scrapYear) return false;
-            if (sepYear !== null && mfgYear === sepYear) return false;
-            if (chkYear !== null && mfgYear >= chkYear) {
-              const edit = lotCellEdits.find(e => Number(e.row_idx) === (p.sr_no - 1) && String(e.col_idx) === 'repairable');
-              let isRepairable = p.repairable;
-              if (edit) {
-                isRepairable = (edit.value === 'true' || edit.value === true);
-              } else if (isRepairable === undefined || isRepairable === null) {
-                isRepairable = (p.status === 'Repairable');
-              }
-              if (isRepairable !== true && isRepairable !== 'true') {
-                return false;
-              }
-            }
-          }
-          return true;
-        });
-        if (panels.length > 0) return panels.length;
-        let validScanCount = 0;
-        lotScanLogs.forEach(sl => {
-          const mfgYear = sl.mfg_year || extractMfgYear(sl.actual_serial_no);
-          if (mfgYear) {
-            if (mfgYear <= scrapYear) return;
-            if (sepYear !== null && mfgYear === sepYear) return;
-          }
-          if (sl.scrap === 'Yes' || sl.scrap === 'Separate') return;
-          validScanCount++;
-        });
-        return validScanCount;
+        return 0;
       }
     }
   }

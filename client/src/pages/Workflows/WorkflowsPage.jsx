@@ -301,9 +301,10 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
 
     return baselinesToUse.map(base => {
       const name = presetPartCodeNames[base.part_code] || base.part_code;
+      const optionVal = `${base.part_code} - ${name}`;
       return {
-        value: `${base.part_code} - ${name}`,
-        label: `${base.part_code} — ${name}  (verified: ${base.verified_qty} PCBs)`
+        value: optionVal,
+        label: `${base.part_code} - ${base.verified_qty} verified (${name})`
       };
     });
   };
