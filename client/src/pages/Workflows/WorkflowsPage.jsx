@@ -238,8 +238,19 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
 
   const getExistingLoggedQtyForSelectedPcbType = (stepNo) => {
     if (!lotProductionStats || !lotProductionStats.pcb_type_stats || !productionPcbType) return 0;
-    const key = `${stepNo}_${productionPcbType}`;
-    const stats = lotProductionStats.pcb_type_stats[key];
+    const targetSa = (String(productionPcbType).match(/SA\d+/i) || [])[0]?.toUpperCase() || productionPcbType.split(' - ')[0].trim().toUpperCase();
+
+    const keys = Object.keys(lotProductionStats.pcb_type_stats || {});
+    const matchingKey = keys.find(k => {
+      const parts = k.split('_');
+      const sNo = parseInt(parts[0], 10);
+      const pType = parts.slice(1).join('_');
+      const pSa = (String(pType).match(/SA\d+/i) || [])[0]?.toUpperCase() || pType.split(' - ')[0].trim().toUpperCase();
+      return sNo === stepNo && (pSa === targetSa || pType === productionPcbType);
+    });
+
+    if (!matchingKey) return 0;
+    const stats = lotProductionStats.pcb_type_stats[matchingKey];
     if (!stats) return 0;
 
     if (stepNo === 2) return (stats.repairable_qty || 0) + (stats.scrap_qty || 0);

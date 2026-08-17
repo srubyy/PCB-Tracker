@@ -1011,6 +1011,19 @@ export const getLotProductionStats = async (req, res) => {
     const scannedBaselines = baselines.filter(b => b.verified_qty > 0);
     stats.part_code_baselines = scannedBaselines.length > 0 ? scannedBaselines : baselines;
 
+    const presetPartCodeNames = {
+      "SA0019": "PCB GV2_CFEfficio",
+      "SA0021": "GV2  Main PCB 1200mm Reg_28W",
+      "SA0022": "GV2 Main PCB 1400mm Reg 35W",
+      "SA0011": "PCB GV3 Digital Renesat",
+      "SA0010": "GV3 Smart Digital 1200mm",
+      "SA0061": "GV3 Power PCB White",
+      "SA0060": "GV3 Power PCB Black",
+      "SA0039": "GV4 Studio+ Remote_ 1200mm",
+      "SA0038": "GV4 Alpha PCB_Regulator_1200mm",
+      "SA0087": "GV4 Ozeo PCB_Main_1200mm"
+    };
+
     const partCodeCaps = {};
     const partCodesList = new Set([
       ...Object.keys(partCodeCounts),
@@ -1019,9 +1032,16 @@ export const getLotProductionStats = async (req, res) => {
     ]);
     for (const pc of partCodesList) {
       if (pc) {
-        partCodeCaps[pc] = {};
+        const cleanPc = (String(pc).match(/SA\d+/i) || [])[0]?.toUpperCase() || pc.trim().toUpperCase();
+        const capObj = {};
         for (let s = 2; s <= 12; s++) {
-          partCodeCaps[pc][s] = await getPartCodeStepCap(lotId, s, pc);
+          capObj[s] = await getPartCodeStepCap(lotId, s, cleanPc);
+        }
+        partCodeCaps[cleanPc] = capObj;
+        partCodeCaps[pc] = capObj;
+        const name = presetPartCodeNames[cleanPc];
+        if (name) {
+          partCodeCaps[`${cleanPc} - ${name}`] = capObj;
         }
       }
     }
