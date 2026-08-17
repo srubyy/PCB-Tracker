@@ -1338,25 +1338,37 @@ export const getExcelData = async (req, res) => {
       const sheetRec = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId || s.lot_id === rawLotId);
       if (sheetRec && sheetRec.raw_json) {
         sheets = typeof sheetRec.raw_json === 'string' ? JSON.parse(sheetRec.raw_json) : sheetRec.raw_json;
-      } else {
-        const diskPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_sheet.json`);
-        const rawDiskPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_sheet.json`);
-        const targetPath = fs.existsSync(diskPath) ? diskPath : (fs.existsSync(rawDiskPath) ? rawDiskPath : null);
-        if (targetPath) {
-          try {
-            sheets = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
-            if (sheets && Object.keys(sheets).length > 0) {
-              memoryDb.tables.lot_raw_sheets = (memoryDb.tables.lot_raw_sheets || []).filter(s => s.lot_id !== lotId && s.lot_id !== rawLotId);
-              memoryDb.tables.lot_raw_sheets.push({ lot_id: lotId, raw_json: JSON.stringify(sheets) });
-            }
-          } catch (e) {}
-        }
       }
     } else {
       const sheetRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
       if (sheetRes.rows.length > 0 && sheetRes.rows[0].raw_json) {
         const raw = sheetRes.rows[0].raw_json;
         sheets = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      }
+    }
+
+    if (!sheets || Object.keys(sheets).length === 0) {
+      const diskPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_sheet.json`);
+      const rawDiskPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_sheet.json`);
+      const diskRawPath = path.join(process.cwd(), 'uploads', `lot_${lotId}_raw.json`);
+      const rawDiskRawPath = path.join(process.cwd(), 'uploads', `lot_${rawLotId}_raw.json`);
+      const targetPath = fs.existsSync(diskPath) ? diskPath : 
+                        (fs.existsSync(rawDiskPath) ? rawDiskPath : 
+                        (fs.existsSync(diskRawPath) ? diskRawPath : 
+                        (fs.existsSync(rawDiskRawPath) ? rawDiskRawPath : null)));
+      if (targetPath) {
+        try {
+          sheets = JSON.parse(fs.readFileSync(targetPath, 'utf8'));
+          if (sheets && Object.keys(sheets).length > 0) {
+            if (isFallback()) {
+              memoryDb.tables.lot_raw_sheets = (memoryDb.tables.lot_raw_sheets || []).filter(s => s.lot_id !== lotId && s.lot_id !== rawLotId);
+              memoryDb.tables.lot_raw_sheets.push({ lot_id: lotId, raw_json: JSON.stringify(sheets) });
+            } else {
+              await pool.query('DELETE FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [lotId, rawLotId]);
+              await pool.query('INSERT INTO lot_raw_sheets (lot_id, raw_json) VALUES ($1, $2)', [lotId, JSON.stringify(sheets)]);
+            }
+          }
+        } catch (e) {}
       }
     }
   } catch (err) {

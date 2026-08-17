@@ -40,9 +40,6 @@ const checkAndAutoSetComplete = async (lotId, actorId, clientTransaction = null)
 export const getStock = async (req, res) => {
   try {
     let lots = await Lot.getAll(req.query);
-    if (req.user && req.user.role === 'Employee') {
-      lots = lots.filter(l => l.status === 'Active');
-    }
     const result = [];
 
     for (const lot of lots) {
