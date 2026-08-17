@@ -1,0 +1,14 @@
+{
+  "Sheet1": [
+    ["Date", "Date Scanned", "Time", "Serial No", "Part Code", "PCB Description", "Status", "Mfg Year", "Repairable"],
+    ["15/07/2026", "", "", "SR17001", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17002", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17003", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17004", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17005", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17006", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17007", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17008", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"],
+    ["15/07/2026", "", "", "SR17009", "SA0010", "GV3 Smart Digital 1200mm", "Scanned", "2023", "true"]
+  ]
+}

@@ -231,11 +231,7 @@ function App() {
                   <option value="">All Lots (Global View)</option>
                   {Array.isArray(lots) && lots
                     .filter(l => {
-                      const matchesCompany = selectedCompany ? l.client_name && l.client_name.toLowerCase().includes(selectedCompany.toLowerCase()) : false;
-                      if (user && user.role === 'Employee') {
-                        return matchesCompany && l.status === 'Active';
-                      }
-                      return matchesCompany;
+                      return selectedCompany ? l.client_name && l.client_name.toLowerCase().includes(selectedCompany.toLowerCase()) : false;
                     })
                     .map(l => (
                       <option key={l.id} value={l.lot_no}>Lot {l.lot_no}</option>
