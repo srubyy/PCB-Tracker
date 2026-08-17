@@ -313,8 +313,9 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     return baselinesToUse.map(base => {
       const name = presetPartCodeNames[base.part_code] || base.part_code;
       const cleanCode = base.part_code;
+      const fullVal = `${cleanCode} - ${name}`;
       return {
-        value: cleanCode,
+        value: fullVal,
         label: `${cleanCode} - ${base.verified_qty} verified (${name})`
       };
     });

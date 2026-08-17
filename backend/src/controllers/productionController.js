@@ -407,18 +407,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       });
 
       if (panels.length > 0) return panels.length;
-
-      let validScanCount = 0;
-      lotScanLogs.forEach(sl => {
-        const mfgYear = sl.mfg_year || extractMfgYear(sl.actual_serial_no);
-        if (mfgYear) {
-          if (mfgYear <= scrapYear) return;
-          if (sepYear !== null && mfgYear === sepYear) return;
-        }
-        if (sl.scrap === 'Yes' || sl.scrap === 'Separate') return;
-        validScanCount++;
-      });
-      return validScanCount;
+      return 0;
     } else {
       try {
         const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold, checkbox_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
@@ -431,7 +420,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
           SELECT COUNT(DISTINCT p.id)::integer 
           FROM panels p
           JOIN scan_logs sl ON (sl.lot_id = p.lot_id OR sl.lot_id = $4) AND sl.timestamp IS NOT NULL AND (
-            (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
+            (sl.row_idx IS NOT NULL AND (sl.row_idx + 1 = p.sr_no OR sl.row_idx = p.sr_no)) OR
             (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
             (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
           )
@@ -447,17 +436,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             AND (ce.value IS DISTINCT FROM 'false')
         `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
-        const dbCount = res.rows[0].count;
-        if (dbCount > 0) return dbCount;
-
-        const scanRes = await pool.query(`
-          SELECT COUNT(DISTINCT id)::integer
-          FROM scan_logs
-          WHERE (lot_id = $1 OR lot_id = $4) AND timestamp IS NOT NULL
-            AND (scrap IS NULL OR scrap <> 'Yes')
-            AND (mfg_year IS NULL OR (mfg_year > $2 AND mfg_year <> $3))
-        `, [cleanLotId, scrapYear, sepYear, rawLotId]);
-        return scanRes.rows[0].count;
+        return res.rows[0].count;
       } catch (dbErr) {
         return 0;
       }
