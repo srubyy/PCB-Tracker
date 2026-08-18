@@ -470,17 +470,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
             AND (ce.value IS DISTINCT FROM 'false')
         `, [cleanLotId, cleanPartCode, scrapYear, rawLotId, sepYear, chkYear]);
 
-        const count = res.rows[0].count;
-        if (count > 0) return count;
-
-        const scanRes = await pool.query(`
-          SELECT COUNT(DISTINCT id)::integer
-          FROM scan_logs
-          WHERE (lot_id = $1 OR lot_id = $4) AND timestamp IS NOT NULL
-            AND (scrap IS NULL OR scrap <> 'Yes')
-            AND (mfg_year IS NULL OR (mfg_year > $2 AND mfg_year <> $3))
-        `, [cleanLotId, scrapYear, sepYear, rawLotId]);
-        return scanRes.rows[0].count;
+        return res.rows[0].count;
       } catch (dbErr) {
         return 0;
       }
