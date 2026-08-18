@@ -356,7 +356,10 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
   }
 
   if (stepNo === 3) {
-    return getStepOkSum(cleanLotId, 2, cleanPartCode, 'repairable_qty');
+    const step2LogSum = await getStepOkSum(cleanLotId, 2, cleanPartCode, 'repairable_qty');
+    if (step2LogSum > 0) return step2LogSum;
+    const scannedQty = await getScannedVerifiedQtyForPartCode(cleanLotId, cleanPartCode);
+    return scannedQty;
   }
 
   if (stepNo === 4) {
@@ -925,7 +928,8 @@ export const getLotProductionStats = async (req, res) => {
     }
 
     // Filter baselines so the dropdown only shows scanned part codes with verified_qty > 0 for this lot
-    stats.part_code_baselines = baselines.filter(b => b.verified_qty > 0);
+    const scannedBaselines = baselines.filter(b => b.verified_qty > 0);
+    stats.part_code_baselines = scannedBaselines.length > 0 ? scannedBaselines : baselines;
 
     const presetPartCodeNames = {
       "SA0019": "PCB GV2_CFEfficio",
