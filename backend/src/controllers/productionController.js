@@ -428,20 +428,7 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         return true;
       });
 
-      if (repairablePanels.length > 0) return repairablePanels.length;
-
-      let scanRepairableCount = 0;
-      lotScanLogs.forEach(sl => {
-        const mfgYear = sl.mfg_year || extractMfgYear(sl.actual_serial_no);
-        if (mfgYear) {
-          if (mfgYear <= scrapYear) return;
-          if (sepYear !== null && mfgYear === sepYear) return;
-        }
-        if (sl.scrap === 'Yes' || sl.scrap === 'Separate') return;
-        scanRepairableCount++;
-      });
-
-      return scanRepairableCount;
+      return repairablePanels.length;
     } else {
       try {
         const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold, checkbox_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
