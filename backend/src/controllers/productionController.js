@@ -1053,16 +1053,69 @@ export const getLotProductionStats = async (req, res) => {
         baselines = refetched.rows;
       }
     }
-    // Dynamically compute real-time scanned verified count per part code for baselines
-    for (const base of baselines) {
-      if (!base.locked) {
-        base.verified_qty = await getScannedVerifiedQtyForPartCode(lotId, base.part_code);
+
+    const allLotPartCodes = new Set();
+    (baselines || []).forEach(b => {
+      if (b && b.part_code) allLotPartCodes.add(b.part_code.trim().toUpperCase());
+    });
+    Object.keys(partCodeCounts).forEach(pc => {
+      if (pc) {
+        const sa = (pc.match(/SA\d+/i)?.[0] || pc.split(' - ')[0]).trim().toUpperCase();
+        if (sa) allLotPartCodes.add(sa);
       }
+    });
+
+    if (isFallback()) {
+      (memoryDb.tables.scan_logs || []).filter(sl => sl.lot_id === lotId || sl.lot_id === rawLotId).forEach(sl => {
+        if (sl.actual_serial_no) {
+          const sa = sl.actual_serial_no.match(/SA\d+/i)?.[0]?.toUpperCase();
+          if (sa) allLotPartCodes.add(sa);
+        }
+      });
+      const sheetRec = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === lotId || s.lot_id === rawLotId);
+      if (sheetRec && sheetRec.raw_json) {
+        try {
+          const sheets = typeof sheetRec.raw_json === 'string' ? JSON.parse(sheetRec.raw_json) : sheetRec.raw_json;
+          Object.values(sheets).forEach(rows => {
+            if (!Array.isArray(rows) || rows.length < 2) return;
+            const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+            let pcIdx = header.indexOf('part code');
+            if (pcIdx === -1) pcIdx = header.findIndex(h => h.includes('part') || h.includes('code'));
+            if (pcIdx === -1) pcIdx = 4;
+            rows.slice(1).forEach(row => {
+              if (row && row[pcIdx]) {
+                const sa = (String(row[pcIdx]).match(/SA\d+/i)?.[0] || String(row[pcIdx]).split(' - ')[0]).trim().toUpperCase();
+                if (sa) allLotPartCodes.add(sa);
+              }
+            });
+          });
+        } catch (e) {}
+      }
+    } else {
+      try {
+        const pCodesRes = await pool.query('SELECT DISTINCT UPPER(TRIM(part_code)) as pc FROM panels WHERE (lot_id = $1 OR lot_id = $2) AND part_code IS NOT NULL AND part_code <> \'\'', [lotId, rawLotId]);
+        pCodesRes.rows.forEach(r => {
+          if (r.pc) {
+            const sa = (r.pc.match(/SA\d+/i)?.[0] || r.pc.split(' - ')[0]).trim().toUpperCase();
+            if (sa) allLotPartCodes.add(sa);
+          }
+        });
+      } catch (e) {}
     }
 
-    // Filter baselines so the dropdown only shows scanned part codes with verified_qty > 0 for this lot
-    const scannedBaselines = baselines.filter(b => b.verified_qty > 0);
-    stats.part_code_baselines = scannedBaselines.length > 0 ? scannedBaselines : baselines;
+    const dynamicBaselines = [];
+    for (const pc of allLotPartCodes) {
+      const vQty = await getScannedVerifiedQtyForPartCode(lotId, pc);
+      dynamicBaselines.push({
+        part_code: pc,
+        verified_qty: vQty,
+        locked: false
+      });
+    }
+
+    dynamicBaselines.sort((a, b) => b.verified_qty - a.verified_qty);
+    const activeBaselines = dynamicBaselines.filter(b => b.verified_qty > 0);
+    stats.part_code_baselines = activeBaselines.length > 0 ? activeBaselines : dynamicBaselines;
 
     const presetPartCodeNames = {
       "SA0019": "PCB GV2_CFEfficio",
