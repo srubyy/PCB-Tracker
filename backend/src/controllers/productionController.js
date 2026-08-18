@@ -285,6 +285,8 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
 
   if (isFallback()) {
     const lotScanLogs = (memoryDb.tables.scan_logs || []).filter(sl => (sl.lot_id === cleanLotId || sl.lot_id === rawLotId) && sl.timestamp);
+    if (lotScanLogs.length === 0) return 0;
+
     const scannedRowIndices = new Set(lotScanLogs.map(sl => sl.row_idx).filter(r => r !== null && r !== undefined));
     const scannedDummyNos = new Set(lotScanLogs.map(sl => sl.dummy_sr_no).filter(Boolean));
     const scannedBarcodes = new Set(lotScanLogs.map(sl => sl.actual_serial_no).filter(Boolean));
@@ -295,6 +297,7 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
       if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
 
       const isScanned = scannedRowIndices.has(p.sr_no - 1) || 
+                        scannedRowIndices.has(p.sr_no) ||
                         scannedDummyNos.has(p.dummy_sr_no) ||
                         scannedBarcodes.has(p.barcode) ||
                         scannedBarcodes.has(p.real_sr_no);
@@ -302,17 +305,42 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
     });
 
     if (scannedPanels.length > 0) return scannedPanels.length;
-    return lotScanLogs.filter(sl => {
-      const pCode = sl.actual_serial_no ? (sl.actual_serial_no.match(/SA\d+/i)?.[0]?.toUpperCase() || 'SA0010') : 'SA0010';
-      return pCode === cleanPartCode;
-    }).length;
+
+    // Direct row_idx match against lot_raw_sheets
+    const sheetRec = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === cleanLotId || s.lot_id === rawLotId);
+    if (sheetRec && sheetRec.raw_json) {
+      try {
+        const sheets = typeof sheetRec.raw_json === 'string' ? JSON.parse(sheetRec.raw_json) : sheetRec.raw_json;
+        let matchCount = 0;
+        Object.values(sheets).forEach(rows => {
+          if (!Array.isArray(rows) || rows.length < 2) return;
+          const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+          let pcIdx = header.indexOf('part code');
+          if (pcIdx === -1) pcIdx = header.findIndex(h => h.includes('part') || h.includes('code'));
+          if (pcIdx === -1) pcIdx = 4;
+
+          lotScanLogs.forEach(sl => {
+            if (sl.row_idx !== null && sl.row_idx !== undefined) {
+              const row = rows[sl.row_idx + 1] || rows[sl.row_idx];
+              if (row && row[pcIdx]) {
+                const pCode = String(row[pcIdx]).trim().toUpperCase();
+                if (pCode.includes(cleanPartCode)) matchCount++;
+              }
+            }
+          });
+        });
+        if (matchCount > 0) return matchCount;
+      } catch (e) {}
+    }
+
+    return lotScanLogs.length;
   } else {
     try {
       const res = await pool.query(`
         SELECT COUNT(DISTINCT p.id)::integer 
         FROM panels p
         JOIN scan_logs sl ON (sl.lot_id = p.lot_id OR sl.lot_id = $3) AND sl.timestamp IS NOT NULL AND (
-          (sl.row_idx IS NOT NULL AND sl.row_idx + 1 = p.sr_no) OR
+          (sl.row_idx IS NOT NULL AND (sl.row_idx + 1 = p.sr_no OR sl.row_idx = p.sr_no)) OR
           (sl.dummy_sr_no IS NOT NULL AND sl.dummy_sr_no <> '' AND sl.dummy_sr_no = p.dummy_sr_no) OR
           (sl.actual_serial_no IS NOT NULL AND sl.actual_serial_no <> '' AND (sl.actual_serial_no = p.barcode OR sl.actual_serial_no = p.real_sr_no))
         )
@@ -327,8 +355,7 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
         SELECT COUNT(DISTINCT id)::integer
         FROM scan_logs
         WHERE (lot_id = $1 OR lot_id = $3) AND timestamp IS NOT NULL
-          AND UPPER(actual_serial_no) LIKE '%' || $2 || '%'
-      `, [cleanLotId, cleanPartCode, rawLotId]);
+      `, [cleanLotId, rawLotId]);
       return scanRes.rows[0].count;
     } catch (err) {
       return 0;
