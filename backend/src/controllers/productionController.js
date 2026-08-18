@@ -333,7 +333,7 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
       } catch (e) {}
     }
 
-    return lotScanLogs.length;
+    return 0;
   } else {
     try {
       const res = await pool.query(`
@@ -348,15 +348,7 @@ export const getScannedVerifiedQtyForPartCode = async (lotId, partCode) => {
           AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
       `, [cleanLotId, cleanPartCode, rawLotId]);
 
-      const count = res.rows[0].count;
-      if (count > 0) return count;
-
-      const scanRes = await pool.query(`
-        SELECT COUNT(DISTINCT id)::integer
-        FROM scan_logs
-        WHERE (lot_id = $1 OR lot_id = $3) AND timestamp IS NOT NULL
-      `, [cleanLotId, rawLotId]);
-      return scanRes.rows[0].count;
+      return res.rows[0].count;
     } catch (err) {
       return 0;
     }
