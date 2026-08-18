@@ -1095,12 +1095,10 @@ export const getLotProductionStats = async (req, res) => {
       } catch (e) {}
     }
 
-    const validPartCodes = Array.from(allLotPartCodes).filter(pc => /^SA\d+/i.test(pc) || presetPartCodeNames[pc]);
-
     const dynamicBaselines = [];
-    for (const pc of validPartCodes) {
-      const vQty = await getScannedVerifiedQtyForPartCode(lotId, pc);
-      if (vQty > 0) {
+    for (const pc of allLotPartCodes) {
+      if (pc) {
+        const vQty = await getScannedVerifiedQtyForPartCode(lotId, pc);
         dynamicBaselines.push({
           part_code: pc,
           verified_qty: vQty,
@@ -1110,7 +1108,8 @@ export const getLotProductionStats = async (req, res) => {
     }
 
     dynamicBaselines.sort((a, b) => b.verified_qty - a.verified_qty);
-    stats.part_code_baselines = dynamicBaselines;
+    const scanned = dynamicBaselines.filter(b => Number(b.verified_qty) > 0);
+    stats.part_code_baselines = scanned.length > 0 ? scanned : (baselines.length > 0 ? baselines : dynamicBaselines);
 
     const presetPartCodeNames = {
       "SA0019": "PCB GV2_CFEfficio",
