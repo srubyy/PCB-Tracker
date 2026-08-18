@@ -407,11 +407,11 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
     return edit ? edit.value : (rawVal !== undefined ? String(rawVal) : '');
   };
 
-  // Write single cell edit directly to database
+  // Write single cell edit directly to database with instant UI feedback (no screen flashing)
   const handleCellEdit = async (sheetName, rowIdx, colIdx, val) => {
     const value = String(val).trim();
     
-    // Optimistic Update
+    // Instant UI update
     setCellEdits(prev => {
       const filtered = prev.filter(e => 
         !(e.sheet_name === sheetName && String(e.row_idx) === String(rowIdx) && String(e.col_idx) === String(colIdx))
@@ -419,6 +419,9 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
       return [...filtered, { sheet_name: sheetName, row_idx: rowIdx, col_idx: String(colIdx), value }];
     });
 
+    if (onSuccess) onSuccess();
+
+    // Persist to backend silently in background
     try {
       const res = await apiFetch(`/api/lots/${lotId}/cell-edit`, {
         method: 'POST',
@@ -426,15 +429,10 @@ const InwardMappingImportSection = ({ lotId, apiFetch, showToast, onSuccess }) =
       });
       if (!res.ok) {
         showToast('Failed to save cell edit.', 'danger');
-        loadExcelData();
-      } else {
-        loadExcelData();
-        if (onSuccess) onSuccess();
       }
     } catch (err) {
       console.error(err);
       showToast('Error saving cell edit.', 'danger');
-      loadExcelData();
     }
   };
 
