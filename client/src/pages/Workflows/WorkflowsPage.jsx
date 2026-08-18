@@ -218,8 +218,11 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
   };
 
   const getDynamicCapForStepAndPcbType = (stepNo) => {
-    if (!lotProductionStats || !productionPcbType) return 0;
-    const targetSa = (String(productionPcbType).match(/SA\d+/i) || [])[0]?.toUpperCase() || productionPcbType.split(' - ')[0].trim();
+    if (!lotProductionStats) return 0;
+    const activeType = productionPcbType || (getDropdownOptions()[0]?.value || '');
+    if (!activeType) return 0;
+
+    const targetSa = (String(activeType).match(/SA\d+/i) || [])[0]?.toUpperCase() || activeType.split(' - ')[0].trim().toUpperCase();
 
     if (stepNo === 2) {
       if (!lotProductionStats.part_code_counts) return 0;
@@ -228,11 +231,26 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
     }
 
     if (lotProductionStats.part_code_caps) {
-      const matchingKey = Object.keys(lotProductionStats.part_code_caps).find(k => (String(k).match(/SA\d+/i) || [])[0]?.toUpperCase() === targetSa);
+      const matchingKey = Object.keys(lotProductionStats.part_code_caps).find(k => {
+        const cleanK = (String(k).match(/SA\d+/i) || [])[0]?.toUpperCase() || k.split(' - ')[0].trim().toUpperCase();
+        return cleanK === targetSa || k === activeType;
+      });
       if (matchingKey && lotProductionStats.part_code_caps[matchingKey]) {
-        return lotProductionStats.part_code_caps[matchingKey][stepNo] ?? 0;
+        const capVal = lotProductionStats.part_code_caps[matchingKey][stepNo];
+        if (capVal !== undefined && capVal !== null && capVal > 0) return capVal;
       }
     }
+
+    if (lotProductionStats.part_code_baselines) {
+      const base = lotProductionStats.part_code_baselines.find(b => {
+        const cleanB = (String(b.part_code).match(/SA\d+/i) || [])[0]?.toUpperCase() || b.part_code.trim().toUpperCase();
+        return cleanB === targetSa;
+      });
+      if (base && Number(base.verified_qty) > 0) {
+        return Number(base.verified_qty);
+      }
+    }
+
     return 0;
   };
 
@@ -893,13 +911,17 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
                   <div className="form-group" style={{ marginBottom: 16 }}>
                     <label style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontWeight: 700, display: 'block', marginBottom: 6 }}>PCB Product Type</label>
                     <select
-                      value={productionPcbType}
+                      value={productionPcbType || (getDropdownOptions()[0]?.value || '')}
                       onChange={e => setProductionPcbType(e.target.value)}
                       style={{ padding: '8px 12px', background: 'var(--input-bg)', border: '1px solid var(--card-border)', color: 'var(--text-main)', borderRadius: 8, width: '100%', cursor: 'pointer' }}
                     >
-                      {getDropdownOptions().map(opt => (
-                        <option key={opt.value} value={opt.value}>{opt.label}</option>
-                      ))}
+                      {getDropdownOptions().length === 0 ? (
+                        <option value="">-- No PCB Product Types Available --</option>
+                      ) : (
+                        getDropdownOptions().map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))
+                      )}
                     </select>
                   </div>
                 )}
