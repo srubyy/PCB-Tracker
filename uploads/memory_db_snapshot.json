@@ -134,23 +134,37 @@
   ],
   "lots": [
     {
+      "id": 99,
+      "lot_no": 99,
+      "batch_no": "DEMO-2026",
+      "pixel_pitch": "P5.9",
+      "client_id": 1,
+      "qty_sent": 20,
+      "received_qty": 20,
+      "status": "Active",
+      "remarks": "Demo lot for Step 3 PCB metrics verification",
+      "scrap_year_threshold": 2021,
+      "separate_year_threshold": 2022,
+      "checkbox_year_threshold": 2023,
+      "dispatched_qty": 0,
+      "return_qty": 0,
+      "redispatch_qty": 0
+    },
+    {
+      "id": 1,
       "lot_no": 17,
       "batch_no": "DX128",
       "pixel_pitch": "P5.9",
       "client_id": 1,
       "qty_sent": 260,
       "received_qty": 0,
-      "status": "Closed",
-      "remarks": "Successfully completed all refurbishment steps and dispatched.",
+      "status": "Active",
       "scrap_year_threshold": 2021,
       "separate_year_threshold": 2022,
-      "checkbox_year_threshold": 2023,
-      "id": 1,
-      "dispatched_qty": 0,
-      "return_qty": 0,
-      "redispatch_qty": 0
+      "checkbox_year_threshold": 2023
     },
     {
+      "id": 2,
       "lot_no": 18,
       "batch_no": "DX128",
       "pixel_pitch": "P5.9",
@@ -158,16 +172,12 @@
       "qty_sent": 200,
       "received_qty": 0,
       "status": "Active",
-      "remarks": "139 dispatched. 61 pending in various steps. 48 panels pending dispatch.",
       "scrap_year_threshold": 2021,
       "separate_year_threshold": 2022,
-      "checkbox_year_threshold": 2023,
-      "id": 2,
-      "dispatched_qty": 0,
-      "return_qty": 0,
-      "redispatch_qty": 0
+      "checkbox_year_threshold": 2023
     },
     {
+      "id": 3,
       "lot_no": 19,
       "batch_no": "DX128",
       "pixel_pitch": "P5.9",
@@ -175,16 +185,12 @@
       "qty_sent": 500,
       "received_qty": 0,
       "status": "Active",
-      "remarks": "Large batch, currently in early triage and panel assignment stages.",
       "scrap_year_threshold": 2021,
       "separate_year_threshold": 2022,
-      "checkbox_year_threshold": 2023,
-      "id": 3,
-      "dispatched_qty": 0,
-      "return_qty": 0,
-      "redispatch_qty": 0
+      "checkbox_year_threshold": 2023
     },
     {
+      "id": 4,
       "lot_no": 20,
       "batch_no": "DX109",
       "pixel_pitch": "P5.9",
@@ -192,14 +198,9 @@
       "qty_sent": 50,
       "received_qty": 0,
       "status": "Active",
-      "remarks": "Received recently, initial panel assign in progress.",
       "scrap_year_threshold": 2021,
       "separate_year_threshold": 2022,
-      "checkbox_year_threshold": 2023,
-      "id": 4,
-      "dispatched_qty": 0,
-      "return_qty": 0,
-      "redispatch_qty": 0
+      "checkbox_year_threshold": 2023
     }
   ],
   "repair_steps": [
@@ -264,7 +265,208 @@
       "name": "Packing"
     }
   ],
-  "panels": [],
+  "panels": [
+    {
+      "id": 99001,
+      "lot_id": 99,
+      "sr_no": 99001,
+      "part_code": "SA0010",
+      "mfg_year": 2021,
+      "status": "Scrap",
+      "repairable": false,
+      "barcode": "AT2199001"
+    },
+    {
+      "id": 99002,
+      "lot_id": 99,
+      "sr_no": 99002,
+      "part_code": "SA0010",
+      "mfg_year": 2021,
+      "status": "Scrap",
+      "repairable": false,
+      "barcode": "AT2199002"
+    },
+    {
+      "id": 99003,
+      "lot_id": 99,
+      "sr_no": 99003,
+      "part_code": "SA0010",
+      "mfg_year": 2022,
+      "status": "Separate",
+      "repairable": false,
+      "barcode": "AT2299003"
+    },
+    {
+      "id": 99004,
+      "lot_id": 99,
+      "sr_no": 99004,
+      "part_code": "SA0010",
+      "mfg_year": 2022,
+      "status": "Separate",
+      "repairable": false,
+      "barcode": "AT2299004"
+    },
+    {
+      "id": 99005,
+      "lot_id": 99,
+      "sr_no": 99005,
+      "part_code": "SA0010",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399005"
+    },
+    {
+      "id": 99006,
+      "lot_id": 99,
+      "sr_no": 99006,
+      "part_code": "SA0010",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399006"
+    },
+    {
+      "id": 99007,
+      "lot_id": 99,
+      "sr_no": 99007,
+      "part_code": "SA0010",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399007"
+    },
+    {
+      "id": 99008,
+      "lot_id": 99,
+      "sr_no": 99008,
+      "part_code": "SA0010",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399008"
+    },
+    {
+      "id": 99009,
+      "lot_id": 99,
+      "sr_no": 99009,
+      "part_code": "SA0010",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399009"
+    },
+    {
+      "id": 99010,
+      "lot_id": 99,
+      "sr_no": 99010,
+      "part_code": "SA0010",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399010"
+    },
+    {
+      "id": 99011,
+      "lot_id": 99,
+      "sr_no": 99011,
+      "part_code": "SA0060",
+      "mfg_year": 2021,
+      "status": "Scrap",
+      "repairable": false,
+      "barcode": "AT2199011"
+    },
+    {
+      "id": 99012,
+      "lot_id": 99,
+      "sr_no": 99012,
+      "part_code": "SA0060",
+      "mfg_year": 2021,
+      "status": "Scrap",
+      "repairable": false,
+      "barcode": "AT2199012"
+    },
+    {
+      "id": 99013,
+      "lot_id": 99,
+      "sr_no": 99013,
+      "part_code": "SA0060",
+      "mfg_year": 2022,
+      "status": "Separate",
+      "repairable": false,
+      "barcode": "AT2299013"
+    },
+    {
+      "id": 99014,
+      "lot_id": 99,
+      "sr_no": 99014,
+      "part_code": "SA0060",
+      "mfg_year": 2022,
+      "status": "Separate",
+      "repairable": false,
+      "barcode": "AT2299014"
+    },
+    {
+      "id": 99015,
+      "lot_id": 99,
+      "sr_no": 99015,
+      "part_code": "SA0060",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399015"
+    },
+    {
+      "id": 99016,
+      "lot_id": 99,
+      "sr_no": 99016,
+      "part_code": "SA0060",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399016"
+    },
+    {
+      "id": 99017,
+      "lot_id": 99,
+      "sr_no": 99017,
+      "part_code": "SA0060",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399017"
+    },
+    {
+      "id": 99018,
+      "lot_id": 99,
+      "sr_no": 99018,
+      "part_code": "SA0060",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399018"
+    },
+    {
+      "id": 99019,
+      "lot_id": 99,
+      "sr_no": 99019,
+      "part_code": "SA0060",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399019"
+    },
+    {
+      "id": 99020,
+      "lot_id": 99,
+      "sr_no": 99020,
+      "part_code": "SA0060",
+      "mfg_year": 2023,
+      "status": "Repairable",
+      "repairable": true,
+      "barcode": "AT2399020"
+    }
+  ],
   "panel_logs": [],
   "defect_codes": [
     {
@@ -296,6 +498,36 @@
       "description": "Clock signal timing error",
       "category": "Signal Integrity",
       "id": 5
+    },
+    {
+      "code": "IC-FAIL",
+      "description": "Failed driver IC test (needs replacement)",
+      "category": "IC Defect",
+      "id": 6
+    },
+    {
+      "code": "SLD-BRG",
+      "description": "Solder bridging detected on display pins",
+      "category": "Solder Bridge",
+      "id": 7
+    },
+    {
+      "code": "SIL-DMG",
+      "description": "Damaged silicon coating on PCB back",
+      "category": "Silicon Damage",
+      "id": 8
+    },
+    {
+      "code": "PAD-DMG",
+      "description": "Lifted or torn copper pad",
+      "category": "Pad Damage",
+      "id": 9
+    },
+    {
+      "code": "CLK-ERR",
+      "description": "Clock signal timing error",
+      "category": "Signal Integrity",
+      "id": 10
     }
   ],
   "performance_scores": [],
@@ -362,16 +594,25 @@
     {
       "id": 9,
       "client_id": 2,
-      "part_code": "SA0038",
-      "name": "GV4 Alpha PCB_Regulator_1200mm"
-    },
-    {
-      "id": 10,
-      "client_id": 2,
       "part_code": "SA0087",
       "name": "GV4 Ozeo PCB_Main_1200mm"
     }
   ],
-  "lot_part_code_baselines": [],
+  "lot_part_code_baselines": [
+    {
+      "id": 991,
+      "lot_id": 99,
+      "part_code": "SA0010",
+      "verified_qty": 10,
+      "locked": false
+    },
+    {
+      "id": 992,
+      "lot_id": 99,
+      "part_code": "SA0060",
+      "verified_qty": 10,
+      "locked": false
+    }
+  ],
   "lot_raw_sheets": []
 }
