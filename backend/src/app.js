@@ -13,7 +13,8 @@ app.use((req, res, next) => {
   next();
 });
 
-// Mount unified routing under /api prefix
+// Mount unified routing under both /api prefix and root / for serverless compatibility
 app.use('/api', apiRouter);
+app.use('/', apiRouter);
 
 export default app;
