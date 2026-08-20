@@ -2,6 +2,183 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
+// Memory storage collections
+export const tables = {
+  clients: [],
+  users: [],
+  lots: [],
+  repair_steps: [
+    { id: 1, step_no: 1, name: 'Inward' },
+    { id: 2, step_no: 2, name: 'Segregation' },
+    { id: 3, step_no: 3, name: 'Programming' },
+    { id: 4, step_no: 4, name: '1st Testing' },
+    { id: 5, step_no: 5, name: 'Debug' },
+    { id: 6, step_no: 6, name: 'Entry' },
+    { id: 7, step_no: 7, name: 'Cleaning' },
+    { id: 8, step_no: 8, name: 'QC After Cleaning' },
+    { id: 9, step_no: 9, name: 'Marking & Coating' },
+    { id: 10, step_no: 10, name: 'Final Testing' },
+    { id: 11, step_no: 11, name: 'Final Entry' },
+    { id: 12, step_no: 12, name: 'Packing' }
+  ],
+  panels: [],
+  panel_logs: [],
+  defect_codes: [],
+  performance_scores: [],
+  pending_logs: [],
+  lot_transactions: [],
+  production_logs: [],
+  pending_production_logs: [],
+  cell_edits: [],
+  scan_logs: [],
+  export_history: [],
+  checkpoint_scans: [],
+  checkpoint_results: [],
+  missing_pcbs: [],
+  checkpoint_acknowledgements: [],
+  client_part_codes: [],
+  lot_part_code_baselines: [],
+  lot_raw_sheets: []
+};
+
+// --- Seed Parsing Helpers ---
+
+function splitSqlValues(valStr) {
+  const parts = [];
+  let current = '';
+  let inQuotes = false;
+  let parenDepth = 0;
+  for (let i = 0; i < valStr.length; i++) {
+    const char = valStr[i];
+    if (char === "'" && (i === 0 || valStr[i - 1] !== '\\')) {
+      inQuotes = !inQuotes;
+      current += char;
+    } else if (!inQuotes && char === '(') {
+      parenDepth++;
+      current += char;
+    } else if (!inQuotes && char === ')') {
+      parenDepth--;
+      current += char;
+    } else if (char === ',' && !inQuotes && parenDepth === 0) {
+      parts.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  if (current.trim()) {
+    parts.push(current.trim());
+  }
+  return parts;
+}
+
+function parseSqlValue(val) {
+  val = val.trim();
+  if (val.toLowerCase() === 'null') return null;
+  if (val.toLowerCase() === 'true') return true;
+  if (val.toLowerCase() === 'false') return false;
+
+  if (val.startsWith("'") && val.endsWith("'")) {
+    return val.slice(1, -1).replace(/''/g, "'");
+  }
+  if (!isNaN(val)) {
+    return Number(val);
+  }
+  if (val.startsWith('(') && val.endsWith(')')) {
+    const subquery = val.slice(1, -1).trim();
+    const selectMatch = subquery.match(/SELECT\s+(\w+)\s+FROM\s+(\w+)\s+WHERE\s+(.+)/i);
+    if (selectMatch) {
+      const [, colToSelect, tblName, whereClause] = selectMatch;
+      const whereMatch = whereClause.match(/(\w+)\s*=\s*(.+)/);
+      if (whereMatch) {
+        const [, whereCol, whereValRaw] = whereMatch;
+        const whereVal = parseSqlValue(whereValRaw);
+        const row = (tables[tblName] || []).find(r => r[whereCol] === whereVal);
+        if (row) {
+          return row[colToSelect];
+        }
+      }
+    }
+  }
+  return val;
+}
+
+function parseInsertLine(line) {
+  const insertIndex = line.indexOf('INSERT INTO ');
+  if (insertIndex === -1) return;
+
+  const afterInsert = line.slice(insertIndex + 12);
+  const openParen = afterInsert.indexOf('(');
+  if (openParen === -1) return;
+  const tblName = afterInsert.slice(0, openParen).trim().toLowerCase();
+
+  if (!tables[tblName]) {
+    tables[tblName] = [];
+  }
+
+  const closeParen = afterInsert.indexOf(')');
+  if (closeParen === -1) return;
+  const cols = afterInsert.slice(openParen + 1, closeParen).split(',').map(c => c.trim());
+
+  const valuesKeyword = afterInsert.indexOf('VALUES', closeParen);
+  if (valuesKeyword === -1) return;
+
+  const valStartParen = afterInsert.indexOf('(', valuesKeyword);
+  if (valStartParen === -1) return;
+
+  let parenDepth = 1;
+  let inQuotes = false;
+  let valEndParen = valStartParen;
+  for (let i = valStartParen + 1; i < afterInsert.length; i++) {
+    const char = afterInsert[i];
+    if (char === "'" && (i === 0 || afterInsert[i - 1] !== '\\')) {
+      inQuotes = !inQuotes;
+    } else if (!inQuotes && char === '(') {
+      parenDepth++;
+    } else if (!inQuotes && char === ')') {
+      parenDepth--;
+      if (parenDepth === 0) {
+        valEndParen = i;
+        break;
+      }
+    }
+  }
+
+  const valStr = afterInsert.slice(valStartParen + 1, valEndParen);
+  const rawVals = splitSqlValues(valStr);
+  const parsedVals = rawVals.map(v => parseSqlValue(v));
+
+  const row = {};
+  cols.forEach((col, idx) => {
+    row[col] = parsedVals[idx];
+  });
+
+  if (!row.id) {
+    const maxId = tables[tblName].reduce((max, r) => Math.max(max, r.id || 0), 0);
+    row.id = maxId + 1;
+  }
+
+  // Handle constraints
+  if (tblName === 'lots') {
+    if (row.dispatched_qty === undefined) row.dispatched_qty = 0;
+    if (row.return_qty === undefined) row.return_qty = 0;
+    if (row.redispatch_qty === undefined) row.redispatch_qty = 0;
+    const exists = tables.lots.some(r => r.lot_no === row.lot_no);
+    if (exists) return;
+  } else if (tblName === 'users') {
+    const exists = tables.users.some(r => r.email === row.email || r.name === row.name);
+    if (exists) return;
+  } else if (tblName === 'clients') {
+    const exists = tables.clients.some(r => r.name === row.name);
+    if (exists) return;
+  } else if (tblName === 'panels') {
+    const exists = tables.panels.some(r => r.barcode === row.barcode);
+    if (exists) return;
+  }
+
+  tables[tblName].push(row);
+}
+
 const getSnapshotPath = () => {
   const localDir = path.join(process.cwd(), 'uploads');
   try {
@@ -19,7 +196,7 @@ export const saveSnapshot = () => {
     const snapPath = getSnapshotPath();
     fs.writeFileSync(snapPath, JSON.stringify(tables, null, 2), 'utf8');
   } catch (err) {
-    // Silently ignore write errors on serverless Vercel
+    // Silently ignore read-only filesystem errors on serverless Vercel
   }
 };
 
