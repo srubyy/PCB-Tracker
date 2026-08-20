@@ -8,14 +8,18 @@ if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.a
 const API_BASE_URL = rawApiUrl;
 
 const safeJson = async (res) => {
-  const contentType = res.headers.get('content-type');
-  if (!contentType || !contentType.includes('application/json')) {
-    throw new Error('Server returned a non-JSON response. Please ensure your backend is deployed and VITE_API_BASE_URL is configured in your Vercel settings.');
-  }
   try {
-    return await res.json();
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      if (!res.ok) {
+        throw new Error(`Server error (${res.status}): Please check backend configuration.`);
+      }
+      throw new Error('Server returned a non-JSON response.');
+    }
   } catch (err) {
-    throw new Error('Failed to parse server response.');
+    throw err;
   }
 };
 

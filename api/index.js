@@ -13,11 +13,19 @@ async function initServerless() {
       initializeMemoryDb();
     }
   } catch (e) {
-    initializeMemoryDb();
+    try {
+      initializeMemoryDb();
+    } catch (memErr) {}
   }
 }
 
 export default async (req, res) => {
-  await initServerless();
-  return app(req, res);
+  try {
+    await initServerless();
+    return app(req, res);
+  } catch (err) {
+    console.error("Vercel serverless error:", err);
+    res.setHeader('Content-Type', 'application/json');
+    res.status(500).json({ error: "Serverless execution error", details: String(err?.message || err) });
+  }
 };

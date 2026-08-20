@@ -186,7 +186,7 @@ export const saveSnapshot = () => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(snapshotPath, JSON.stringify(tables, null, 2), 'utf8');
   } catch (err) {
-    console.error('Failed to save memoryDb snapshot:', err.message);
+    // Silently ignore read-only filesystem errors on serverless Vercel
   }
 };
 
