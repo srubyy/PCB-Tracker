@@ -5,11 +5,12 @@ dotenv.config();
 
 const { Pool } = pg;
 
-const isLocalhost = !process.env.DATABASE_URL || process.env.DATABASE_URL.includes('localhost') || process.env.DATABASE_URL.includes('127.0.0.1');
+const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL || process.env.SUPABASE_POSTGRES_URL || process.env.STORAGE_POSTGRES_URL || process.env.POSTGRES_PRISMA_URL;
+const isLocalhost = !dbUrl || dbUrl.includes('localhost') || dbUrl.includes('127.0.0.1');
 
-const pool = process.env.DATABASE_URL
+const pool = dbUrl
   ? new Pool({
-      connectionString: process.env.DATABASE_URL,
+      connectionString: dbUrl,
       ssl: isLocalhost ? false : { rejectUnauthorized: false }
     })
   : new Pool({
