@@ -1,4 +1,4 @@
-import pool, { isFallback } from '../config/db.js';
+import pool, { isFallback, setFallback } from '../config/db.js';
 import * as memoryDb from '../services/memoryDb.js';
 import { formatUser } from '../utils/avatar.js';
 
@@ -12,6 +12,7 @@ export const User = {
       if (res.rows[0]) return formatUser(res.rows[0]);
     } catch (err) {
       console.warn('DB findByEmail error, falling back:', err.message);
+      setFallback(true);
     }
     return formatUser(memoryDb.findUserByEmail(email));
   },
@@ -25,6 +26,7 @@ export const User = {
       if (res.rows[0]) return formatUser(res.rows[0]);
     } catch (err) {
       console.warn('DB findByIdAndRefreshToken error, falling back:', err.message);
+      setFallback(true);
     }
     return formatUser(memoryDb.findUserByIdAndRefreshToken(Number(id), token));
   },
@@ -38,6 +40,7 @@ export const User = {
       return true;
     } catch (err) {
       console.warn('DB updateRefreshToken error, falling back:', err.message);
+      setFallback(true);
     }
     return memoryDb.updateUserRefreshToken(Number(id), token);
   },

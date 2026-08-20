@@ -17,4 +17,10 @@ app.use((req, res, next) => {
 app.use('/api', apiRouter);
 app.use('/', apiRouter);
 
+// Global Error Handler Middleware
+app.use((err, req, res, next) => {
+  console.error("Express global error handler:", err);
+  res.status(500).json({ error: err.message || "Internal Server Error" });
+});
+
 export default app;
