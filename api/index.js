@@ -1,13 +1,23 @@
 import app from '../backend/src/app.js';
 import { initializeMemoryDb } from '../backend/src/services/memoryDb.js';
+import { testDbConnection } from '../backend/src/config/db.js';
 
-// Auto-initialize memory DB fallback for Vercel environment
-try {
-  initializeMemoryDb();
-} catch (e) {
-  console.error("Vercel memoryDb init error:", e);
+let initialized = false;
+
+async function initServerless() {
+  if (initialized) return;
+  initialized = true;
+  try {
+    const connected = await testDbConnection();
+    if (!connected) {
+      initializeMemoryDb();
+    }
+  } catch (e) {
+    initializeMemoryDb();
+  }
 }
 
-export default (req, res) => {
+export default async (req, res) => {
+  await initServerless();
   return app(req, res);
 };
