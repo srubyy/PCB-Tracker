@@ -108,34 +108,59 @@ const getPartCodeLimit = async (lotId, limitType, partCode) => {
   return 0;
 };
 
-const extractMfgYear = (serial) => {
+const extractMfgYear = (serial, fallbackRaw = '') => {
+  if (fallbackRaw) {
+    const rawStr = String(fallbackRaw).trim();
+    const rawNum = parseInt(rawStr, 10);
+    if (!isNaN(rawNum)) {
+      if (rawNum >= 2010 && rawNum <= 2035) return rawNum;
+      if (rawNum >= 10 && rawNum <= 35) return 2000 + rawNum;
+    }
+    const rawMatch = rawStr.match(/(20[1-3]\d)/);
+    if (rawMatch) return parseInt(rawMatch[1], 10);
+  }
+
   if (!serial) return null;
   const s = String(serial).trim();
+  if (!s) return null;
+
+  // Direct 4-digit year match (e.g. 2021, 2022, 2023, 2024, 2025)
+  const m4 = s.match(/(20[1-3]\d)/);
+  if (m4) {
+    const yr = parseInt(m4[1], 10);
+    if (yr >= 2015 && yr <= 2035) return yr;
+  }
+
   const len = s.length;
   if (s.startsWith('AT') && len <= 8) return null;
+
   const matches = s.match(/[a-zA-Z](\d{2})/g);
   if (matches) {
     for (const m of matches) {
       const yr = parseInt(m.substring(1), 10);
-      if (yr >= 10 && yr <= 50) return 2000 + yr;
+      if (yr >= 15 && yr <= 35) return 2000 + yr;
     }
   }
+
   if (len >= 4) {
     const yrPart = s.substring(2, 4);
     const yr = parseInt(yrPart, 10);
-    if (!isNaN(yr) && yr >= 10 && yr <= 50) return 2000 + yr;
+    if (!isNaN(yr) && yr >= 15 && yr <= 35) return 2000 + yr;
   }
+
   if (len === 16 || len === 17) {
     const yr = parseInt(s.substring(3, 5), 10);
-    if (!isNaN(yr)) return yr + 2000;
+    if (!isNaN(yr) && yr >= 15 && yr <= 35) return yr + 2000;
   }
+
   if (s.startsWith('AGV')) {
     const cIndex = s.indexOf('C');
     if (cIndex !== -1 && s.length > cIndex + 2) {
       const yr = parseInt(s.substring(cIndex + 1, cIndex + 3), 10);
-      if (!isNaN(yr)) return yr + 2000;
+      if (!isNaN(yr) && yr >= 15 && yr <= 35) return yr + 2000;
     }
   }
+
   return null;
 };
 
