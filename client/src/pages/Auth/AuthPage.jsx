@@ -125,6 +125,7 @@ const AuthPage = ({ showToast }) => {
                 theme="filled_dark"
                 shape="rectangular"
                 width="360"
+                useOneTap={false}
               />
             </div>
           </form>
