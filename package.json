@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Fullstack PCB Refurbishment Mobile Web App",
   "main": "backend/server.js",
+  "type": "module",
   "scripts": {
     "install:all": "npm install && npm install --prefix backend && npm install --prefix client",
     "server": "node backend/server.js",
@@ -11,6 +12,16 @@
     "dev": "concurrently \"npm run server\" \"npm run client\""
   },
   "dependencies": {
-    "concurrently": "^8.2.2"
+    "bcryptjs": "^3.0.3",
+    "concurrently": "^8.2.2",
+    "cors": "^2.8.5",
+    "dotenv": "^17.4.2",
+    "exceljs": "^4.4.0",
+    "express": "^4.19.2",
+    "google-auth-library": "^10.9.1",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.11.5",
+    "resend": "^6.12.4",
+    "xlsx": "^0.18.5"
   }
 }
