@@ -390,6 +390,20 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
   }
 
   if (stepNo === 3) {
+    const presetPartCodeNames = {
+      "SA0019": "PCB GV2_CFEfficio",
+      "SA0021": "GV2  Main PCB 1200mm Reg_28W",
+      "SA0022": "GV2 Main PCB 1400mm Reg 35W",
+      "SA0011": "PCB GV3 Digital Renesat",
+      "SA0010": "GV3 Smart Digital 1200mm",
+      "SA0061": "GV3 Power PCB White",
+      "SA0060": "GV3 Power PCB Black",
+      "SA0039": "GV4 Studio+ Remote_ 1200mm",
+      "SA0038": "GV4 Alpha PCB_Regulator_1200mm",
+      "SA0087": "GV4 Ozeo PCB_Main_1200mm"
+    };
+    const presetName = presetPartCodeNames[cleanPartCode] || '';
+
     if (isFallback()) {
       const lot = (memoryDb.tables.lots || []).find(l => l.id === cleanLotId || l.lot_no === rawLotId);
       const scrapYear = lot && lot.scrap_year_threshold !== null ? lot.scrap_year_threshold : 2021;
@@ -397,13 +411,22 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
       const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
 
       const lotCellEdits = (memoryDb.tables.cell_edits || []).filter(e => e.lot_id === cleanLotId || e.lot_id === rawLotId);
+      const allLotPanels = (memoryDb.tables.panels || []).filter(p => p.lot_id === cleanLotId || p.lot_id === rawLotId);
 
-      const repairablePanels = (memoryDb.tables.panels || []).filter(p => {
-        if (p.lot_id !== cleanLotId && p.lot_id !== rawLotId) return false;
-        
+      const matchingPanels = allLotPanels.filter(p => {
         const pCode = (p.part_code || '').trim().toUpperCase();
-        if (pCode !== cleanPartCode && !pCode.includes(cleanPartCode)) return false;
+        if (pCode) {
+          const isMatch = pCode.includes(cleanPartCode) || 
+                          (presetName && pCode.includes(presetName.toUpperCase())) ||
+                          (presetName && presetName.toUpperCase().includes(pCode));
+          if (!isMatch) return false;
+        }
+        return true;
+      });
 
+      const panelsToEvaluate = matchingPanels.length > 0 ? matchingPanels : allLotPanels;
+
+      const repairablePanels = panelsToEvaluate.filter(p => {
         const status = String(p.status || '').toLowerCase();
         if (['scrap', 'separate', 'non-repairable'].includes(status) || p.action === 'Scrap' || p.action === 'Separate') {
           return false;
@@ -437,11 +460,10 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         const chkYear = lot && lot.checkbox_year_threshold !== null ? lot.checkbox_year_threshold : 2023;
 
         let queryStr = `
-          SELECT p.id, p.sr_no, p.barcode, p.real_sr_no, p.mfg_year, p.status, p.repairable, ce.value as edit_value
+          SELECT p.id, p.sr_no, p.barcode, p.real_sr_no, p.mfg_year, p.status, p.repairable, p.part_code, ce.value as edit_value
           FROM panels p
           LEFT JOIN cell_edits ce ON (ce.lot_id = p.lot_id OR ce.lot_id = $3) AND ce.row_idx = p.sr_no - 1 AND (ce.col_idx = 'repairable' OR ce.col_idx = '10')
           WHERE (p.lot_id = $1 OR p.lot_id = $3)
-            AND (UPPER(p.part_code) = $2 OR UPPER(p.part_code) LIKE '%' || $2 || '%')
         `;
 
         const dbRes = await pool.query(queryStr, [cleanLotId, cleanPartCode, rawLotId]);
@@ -449,7 +471,20 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         let validCount = 0;
         const processedIds = new Set();
 
-        for (const p of dbRes.rows) {
+        const matchingRows = dbRes.rows.filter(p => {
+          const pCode = String(p.part_code || '').trim().toUpperCase();
+          if (pCode) {
+            const isMatch = pCode.includes(cleanPartCode) || 
+                            (presetName && pCode.includes(presetName.toUpperCase())) ||
+                            (presetName && presetName.toUpperCase().includes(pCode));
+            if (!isMatch) return false;
+          }
+          return true;
+        });
+
+        const rowsToEvaluate = matchingRows.length > 0 ? matchingRows : dbRes.rows;
+
+        for (const p of rowsToEvaluate) {
           if (processedIds.has(p.id)) continue;
           processedIds.add(p.id);
 
