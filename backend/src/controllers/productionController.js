@@ -475,7 +475,41 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
         return true;
       });
 
-      return repairablePanels.length;
+      if (repairablePanels.length > 0) return repairablePanels.length;
+
+      // Fallback: Check raw sheets if panels table is empty
+      const sheetRec = (memoryDb.tables.lot_raw_sheets || []).find(s => s.lot_id === cleanLotId || s.lot_id === rawLotId);
+      if (sheetRec && sheetRec.raw_json) {
+        try {
+          const sheets = typeof sheetRec.raw_json === 'string' ? JSON.parse(sheetRec.raw_json) : sheetRec.raw_json;
+          let rawCount = 0;
+          Object.values(sheets).forEach(rows => {
+            if (!Array.isArray(rows) || rows.length < 2) return;
+            const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+            let pcIdx = header.indexOf('part code');
+            if (pcIdx === -1) pcIdx = header.findIndex(h => h.includes('part') || h.includes('code'));
+            if (pcIdx === -1) pcIdx = 4;
+            let srIdx = header.findIndex(h => h.includes('serial') || h.includes('barcode') || h.includes('sr'));
+            if (srIdx === -1) srIdx = 3;
+
+            rows.slice(1).forEach(row => {
+              if (!row) return;
+              const rowPc = String(row[pcIdx] || '').trim().toUpperCase();
+              if (rowPc && !rowPc.includes(cleanPartCode) && presetName && !rowPc.includes(presetName.toUpperCase())) return;
+              const srVal = String(row[srIdx] || '');
+              const yr = extractMfgYear(srVal);
+              if (yr) {
+                if (yr <= scrapYear) return;
+                if (sepYear !== null && yr === sepYear) return;
+              }
+              rawCount++;
+            });
+          });
+          if (rawCount > 0) return rawCount;
+        } catch (e) {}
+      }
+
+      return (memoryDb.tables.panels || []).filter(p => (p.lot_id === cleanLotId || p.lot_id === rawLotId) && (p.part_code || '').trim().toUpperCase().includes(cleanPartCode)).length || 0;
     } else {
       try {
         const lotRes = await pool.query('SELECT scrap_year_threshold, separate_year_threshold, checkbox_year_threshold FROM lots WHERE id = $1 OR lot_no = $2', [cleanLotId, rawLotId]);
@@ -533,7 +567,41 @@ export const getPartCodeStepCap = async (lotId, stepNo, partCode) => {
           validCount++;
         }
 
-        return validCount;
+        if (validCount > 0) return validCount;
+
+        // Fallback: Parse lot_raw_sheets in DB mode if panels table returned 0
+        const rawRes = await pool.query('SELECT raw_json FROM lot_raw_sheets WHERE lot_id = $1 OR lot_id = $2', [cleanLotId, rawLotId]);
+        if (rawRes.rows.length > 0 && rawRes.rows[0].raw_json) {
+          try {
+            const sheets = typeof rawRes.rows[0].raw_json === 'string' ? JSON.parse(rawRes.rows[0].raw_json) : rawRes.rows[0].raw_json;
+            let rawCount = 0;
+            Object.values(sheets).forEach(rows => {
+              if (!Array.isArray(rows) || rows.length < 2) return;
+              const header = rows[0].map(h => String(h || '').trim().toLowerCase());
+              let pcIdx = header.indexOf('part code');
+              if (pcIdx === -1) pcIdx = header.findIndex(h => h.includes('part') || h.includes('code'));
+              if (pcIdx === -1) pcIdx = 4;
+              let srIdx = header.findIndex(h => h.includes('serial') || h.includes('barcode') || h.includes('sr'));
+              if (srIdx === -1) srIdx = 3;
+
+              rows.slice(1).forEach(row => {
+                if (!row) return;
+                const rowPc = String(row[pcIdx] || '').trim().toUpperCase();
+                if (rowPc && !rowPc.includes(cleanPartCode) && presetName && !rowPc.includes(presetName.toUpperCase())) return;
+                const srVal = String(row[srIdx] || '');
+                const yr = extractMfgYear(srVal);
+                if (yr) {
+                  if (yr <= scrapYear) return;
+                  if (sepYear !== null && yr === sepYear) return;
+                }
+                rawCount++;
+              });
+            });
+            if (rawCount > 0) return rawCount;
+          } catch (e) {}
+        }
+
+        return 0;
       } catch (dbErr) {
         console.error('Step 3 cap DB query error:', dbErr);
         return 0;

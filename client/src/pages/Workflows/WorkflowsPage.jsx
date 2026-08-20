@@ -237,7 +237,7 @@ const WorkflowsPage = ({ selectedLotNo, selectedCompany, onChangeLot, showToast 
       });
       if (matchingKey && lotProductionStats.part_code_caps[matchingKey]) {
         const capVal = lotProductionStats.part_code_caps[matchingKey][stepNo];
-        if (capVal !== undefined && capVal !== null && capVal >= 0) return capVal;
+        if (capVal !== undefined && capVal !== null && capVal > 0) return capVal;
       }
     }
 
