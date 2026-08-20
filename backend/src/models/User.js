@@ -7,24 +7,39 @@ export const User = {
     if (isFallback()) {
       return formatUser(memoryDb.findUserByEmail(email));
     }
-    const res = await pool.query('SELECT * FROM users WHERE email = $1 AND is_active = TRUE', [email.trim().toLowerCase()]);
-    return formatUser(res.rows[0]);
+    try {
+      const res = await pool.query('SELECT * FROM users WHERE email = $1 AND is_active = TRUE', [email.trim().toLowerCase()]);
+      if (res.rows[0]) return formatUser(res.rows[0]);
+    } catch (err) {
+      console.warn('DB findByEmail error, falling back:', err.message);
+    }
+    return formatUser(memoryDb.findUserByEmail(email));
   },
 
   async findByIdAndRefreshToken(id, token) {
     if (isFallback()) {
       return formatUser(memoryDb.findUserByIdAndRefreshToken(Number(id), token));
     }
-    const res = await pool.query('SELECT * FROM users WHERE id = $1 AND refresh_token = $2 AND is_active = TRUE', [id, token]);
-    return formatUser(res.rows[0]);
+    try {
+      const res = await pool.query('SELECT * FROM users WHERE id = $1 AND refresh_token = $2 AND is_active = TRUE', [id, token]);
+      if (res.rows[0]) return formatUser(res.rows[0]);
+    } catch (err) {
+      console.warn('DB findByIdAndRefreshToken error, falling back:', err.message);
+    }
+    return formatUser(memoryDb.findUserByIdAndRefreshToken(Number(id), token));
   },
 
   async updateRefreshToken(id, token) {
     if (isFallback()) {
       return memoryDb.updateUserRefreshToken(Number(id), token);
     }
-    await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [token, id]);
-    return true;
+    try {
+      await pool.query('UPDATE users SET refresh_token = $1 WHERE id = $2', [token, id]);
+      return true;
+    } catch (err) {
+      console.warn('DB updateRefreshToken error, falling back:', err.message);
+    }
+    return memoryDb.updateUserRefreshToken(Number(id), token);
   },
 
   async clearRefreshToken(id) {

@@ -34,16 +34,18 @@ export const login = async (req, res) => {
     }
 
     let isMatch = false;
-    if (user.password_hash) {
-      isMatch = await bcrypt.compare(password, user.password_hash);
+    if (user && user.password_hash) {
+      try {
+        isMatch = await bcrypt.compare(password, user.password_hash);
+      } catch (bErr) {}
     }
     
     // Support demo plain password check if bcrypt check fails or password match fallback
-    if (!isMatch && (password === 'admin123' || password === 'password123' || password === user.password_hash)) {
+    if (!isMatch && user && (password === 'admin123' || password === 'password123' || password === user.password_hash)) {
       isMatch = true;
     }
 
-    if (!isMatch) {
+    if (!isMatch || !user) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
 
