@@ -11,6 +11,19 @@ import * as memoryDb from '../services/memoryDb.js';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+
+const getUploadsDir = () => {
+  const localDir = path.join(process.cwd(), 'uploads');
+  try {
+    if (!fs.existsSync(localDir)) fs.mkdirSync(localDir, { recursive: true });
+    return localDir;
+  } catch (e) {
+    const tmpDir = path.join(os.tmpdir(), 'uploads');
+    if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
+    return tmpDir;
+  }
+};
 
 const extractMfgYear = (serial, explicitYear = null) => {
   if (explicitYear !== null && explicitYear !== undefined && explicitYear !== '') {
@@ -1085,21 +1098,16 @@ export const uploadExcel = async (req, res) => {
   }
   const lotId = await resolveLotId(rawLotId);
 
-  const uploadsDir = path.join(process.cwd(), 'uploads');
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-  }
-
-  const tempFilePath = path.join(uploadsDir, `lot_${lotId}_temp.xlsx`);
-  const finalJsonPath = path.join(uploadsDir, `lot_${lotId}_raw.json`);
-  const rawJsonPath = path.join(uploadsDir, `lot_${rawLotId}_raw.json`);
-
-  const fileStream = fs.createWriteStream(tempFilePath);
-  req.pipe(fileStream);
-
-  fileStream.on('finish', async () => {
+  const chunks = [];
+  req.on('data', chunk => chunks.push(chunk));
+  req.on('end', async () => {
     try {
-      const workbook = XLSX.readFile(tempFilePath);
+      const buffer = Buffer.concat(chunks);
+      if (!buffer || buffer.length === 0) {
+        return res.status(400).json({ error: "No file content received." });
+      }
+
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
       const sheets = {};
       workbook.SheetNames.forEach(sheetName => {
         const worksheet = workbook.Sheets[sheetName];
@@ -1110,18 +1118,15 @@ export const uploadExcel = async (req, res) => {
         sheets[sheetName] = cleanedRows;
       });
 
-      try { fs.unlinkSync(tempFilePath); } catch (e) {}
+      const uploadsDir = getUploadsDir();
+      const finalJsonPath = path.join(uploadsDir, `lot_${lotId}_raw.json`);
+      const rawJsonPath = path.join(uploadsDir, `lot_${rawLotId}_raw.json`);
+      try { fs.writeFileSync(finalJsonPath, JSON.stringify(sheets), 'utf8'); } catch (e) {}
+      try { fs.writeFileSync(rawJsonPath, JSON.stringify(sheets), 'utf8'); } catch (e) {}
 
-      // Delete any previous raw json files for this lot
-      try { if (fs.existsSync(finalJsonPath)) fs.unlinkSync(finalJsonPath); } catch (e) {}
-      try { if (fs.existsSync(rawJsonPath)) fs.unlinkSync(rawJsonPath); } catch (e) {}
-
-      fs.writeFileSync(finalJsonPath, JSON.stringify(sheets), 'utf8');
-
-      // Save uploaded sheet JSON to disk for fallback persistence
       const sheetDiskPath = path.join(uploadsDir, `lot_${lotId}_sheet.json`);
       const rawSheetDiskPath = path.join(uploadsDir, `lot_${rawLotId}_sheet.json`);
-      fs.writeFileSync(sheetDiskPath, JSON.stringify(sheets), 'utf8');
+      try { fs.writeFileSync(sheetDiskPath, JSON.stringify(sheets), 'utf8'); } catch (e) {}
       try { fs.writeFileSync(rawSheetDiskPath, JSON.stringify(sheets), 'utf8'); } catch (e) {}
 
       // PURGE ALL OLD DATA FOR THIS LOT WHEN A NEW EXCEL IS LOADED
@@ -1154,14 +1159,13 @@ export const uploadExcel = async (req, res) => {
       res.json({ success: true, message: "Imported fresh Excel file successfully and cleared previous excel data." });
     } catch (ex) {
       console.error('Upload handler error:', ex);
-      try { fs.unlinkSync(tempFilePath); } catch (e) {}
       res.status(500).json({ error: ex.message || "Failed to parse Excel file." });
     }
   });
 
-  fileStream.on('error', (err) => {
-    console.error('File stream error:', err);
-    res.status(500).json({ error: "Failed writing uploaded file." });
+  req.on('error', (err) => {
+    console.error('Upload stream error:', err);
+    res.status(500).json({ error: "Failed receiving uploaded file." });
   });
 };
 
