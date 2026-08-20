@@ -1,7 +1,11 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 const AuthContext = createContext(null);
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+let rawApiUrl = import.meta.env.VITE_API_BASE_URL || '';
+if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+  rawApiUrl = '';
+}
+const API_BASE_URL = rawApiUrl;
 
 const safeJson = async (res) => {
   const contentType = res.headers.get('content-type');
